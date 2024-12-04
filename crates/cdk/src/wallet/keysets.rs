@@ -28,6 +28,12 @@ impl Wallet {
         Ok(keys)
     }
 
+    /// Straight up yolo those keys into the db no cap
+    pub async fn add_keyset(&self, keys: Keys) -> Result<(), Error> {
+        self.localstore.add_keys(keys.clone()).await?;
+        Ok(())
+    }
+
     /// Get keysets for mint
     ///
     /// Queries mint for all keysets
