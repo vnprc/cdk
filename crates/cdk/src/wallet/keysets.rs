@@ -92,6 +92,28 @@ impl Wallet {
         Ok(active_keysets)
     }
 
+    /// Get active keyset for mint from local without querying the mint
+    #[instrument(skip(self))]
+    pub async fn get_active_mint_keysets_local(&self) -> Result<Vec<KeySetInfo>, Error> {
+        let active_keysets = match self
+            .localstore
+            .get_mint_keysets(self.mint_url.clone())
+            .await?
+        {
+            Some(keysets) => {
+                keysets
+                    .into_iter()
+                    // .filter(|k| k.active && k.unit == self.unit)
+                    .collect::<Vec<KeySetInfo>>()
+            }
+            None => {
+                vec![]
+            }
+        };
+
+        Ok(active_keysets)
+    }
+
     /// Get active keyset for mint with the lowest fees
     ///
     /// Queries mint for current keysets then gets [`Keys`] for any unknown
