@@ -72,10 +72,7 @@ impl Wallet {
             description,
         };
 
-        let quote_res = self
-            .client
-            .post_mint_quote(mint_url.clone(), request)
-            .await?;
+        let quote_res = self.client.post_mint_quote(request).await?;
 
         let quote = MintQuote {
             mint_url,
@@ -98,10 +95,7 @@ impl Wallet {
         &self,
         quote_id: &str,
     ) -> Result<MintQuoteBolt11Response<String>, Error> {
-        let response = self
-            .client
-            .get_mint_quote_status(self.mint_url.clone(), quote_id)
-            .await?;
+        let response = self.client.get_mint_quote_status(quote_id).await?;
 
         match self.localstore.get_mint_quote(quote_id).await? {
             Some(quote) => {
@@ -275,10 +269,7 @@ impl Wallet {
             outputs: premint_secrets.blinded_messages(),
         };
 
-        let mint_res = self
-            .client
-            .post_mint(self.mint_url.clone(), request)
-            .await?;
+        let mint_res = self.client.post_mint(request).await?;
 
         let keys = self.get_keyset_keys(active_keyset_id).await?;
 
