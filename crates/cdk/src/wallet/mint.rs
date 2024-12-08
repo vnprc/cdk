@@ -176,7 +176,7 @@ impl Wallet {
             Some(spending_conditions) => PreMintSecrets::with_conditions(
                 active_keyset_id,
                 quote_info_amount,
-                &amount_split_target,
+                amount_split_target,
                 spending_conditions,
             )?,
             None => PreMintSecrets::from_xpriv(
@@ -184,7 +184,7 @@ impl Wallet {
                 count,
                 self.xpriv,
                 quote_info_amount,
-                &amount_split_target,
+                amount_split_target,
             )?,
         };
 
