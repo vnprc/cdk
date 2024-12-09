@@ -29,8 +29,27 @@ impl Wallet {
     }
 
     /// Straight up yolo those keys into the db no cap
-    pub async fn add_keyset(&self, keys: Keys) -> Result<(), Error> {
+    pub async fn add_keyset(
+        &self,
+        keys: Keys,
+        active: bool,
+        input_fee_ppk: u64,
+    ) -> Result<(), Error> {
+        // add to localstore
         self.localstore.add_keys(keys.clone()).await?;
+
+        let keyset_info = KeySetInfo {
+            id: Id::from(&keys),
+            active,
+            unit: self.unit.clone(),
+            input_fee_ppk,
+        };
+
+        // somehow also add to localstore...why do I need to make two different calls?
+        self.localstore
+            .add_mint_keysets(self.mint_url.clone(), vec![keyset_info])
+            .await?;
+
         Ok(())
     }
 
@@ -100,12 +119,10 @@ impl Wallet {
             .get_mint_keysets(self.mint_url.clone())
             .await?
         {
-            Some(keysets) => {
-                keysets
-                    .into_iter()
-                    // .filter(|k| k.active && k.unit == self.unit)
-                    .collect::<Vec<KeySetInfo>>()
-            }
+            Some(keysets) => keysets
+                .into_iter()
+                .filter(|k| k.active && k.unit == self.unit)
+                .collect::<Vec<KeySetInfo>>(),
             None => {
                 vec![]
             }
@@ -219,18 +236,18 @@ mod test {
         let wallet = create_wallet();
 
         // Add the keyset
-        wallet.add_keyset(keyset.keys).await.unwrap();
+        wallet.add_keyset(keyset.keys, true, 0).await.unwrap();
 
         // Retrieve the keysets locally
         let active_keysets = wallet.get_active_mint_keysets_local().await.unwrap();
 
         // TODO get this test to pass
         // Validate the retrieved keyset
-        // assert_eq!(active_keysets.len(), 1);
-        // let retrieved_keyset = &active_keysets[0];
-        // assert_eq!(retrieved_keyset.id, keyset_info.id);
-        // assert_eq!(retrieved_keyset.active, keyset_info.active);
-        // assert_eq!(retrieved_keyset.unit, keyset_info.unit);
-        // assert_eq!(retrieved_keyset.input_fee_ppk, keyset_info.input_fee_ppk);
+        assert_eq!(active_keysets.len(), 1);
+        let retrieved_keyset = &active_keysets[0];
+        assert_eq!(retrieved_keyset.id, keyset_info.id);
+        assert_eq!(retrieved_keyset.active, keyset_info.active);
+        assert_eq!(retrieved_keyset.unit, keyset_info.unit);
+        assert_eq!(retrieved_keyset.input_fee_ppk, keyset_info.input_fee_ppk);
     }
 }
