@@ -113,7 +113,7 @@ impl Wallet {
 
     /// Get active keyset for mint from local without querying the mint
     #[instrument(skip(self))]
-    pub async fn get_active_mint_keysets_local(&self) -> Result<Vec<KeySetInfo>, Error> {
+    pub async fn get_active_mint_keyset_local(&self) -> Result<KeySetInfo, Error> {
         let active_keysets = match self
             .localstore
             .get_mint_keysets(self.mint_url.clone())
@@ -128,7 +128,12 @@ impl Wallet {
             }
         };
 
-        Ok(active_keysets)
+        let keyset_with_lowest_fee = active_keysets
+            .into_iter()
+            .min_by_key(|key| key.input_fee_ppk)
+            .ok_or(Error::NoActiveKeyset)?;
+
+        Ok(keyset_with_lowest_fee)
     }
 
     /// Get active keyset for mint with the lowest fees
@@ -239,15 +244,12 @@ mod test {
         wallet.add_keyset(keyset.keys, true, 0).await.unwrap();
 
         // Retrieve the keysets locally
-        let active_keysets = wallet.get_active_mint_keysets_local().await.unwrap();
+        let active_keyset = wallet.get_active_mint_keyset_local().await.unwrap();
 
-        // TODO get this test to pass
         // Validate the retrieved keyset
-        assert_eq!(active_keysets.len(), 1);
-        let retrieved_keyset = &active_keysets[0];
-        assert_eq!(retrieved_keyset.id, keyset_info.id);
-        assert_eq!(retrieved_keyset.active, keyset_info.active);
-        assert_eq!(retrieved_keyset.unit, keyset_info.unit);
-        assert_eq!(retrieved_keyset.input_fee_ppk, keyset_info.input_fee_ppk);
+        assert_eq!(active_keyset.id, keyset_info.id);
+        assert_eq!(active_keyset.active, keyset_info.active);
+        assert_eq!(active_keyset.unit, keyset_info.unit);
+        assert_eq!(active_keyset.input_fee_ppk, keyset_info.input_fee_ppk);
     }
 }
