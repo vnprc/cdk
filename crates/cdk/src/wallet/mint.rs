@@ -5,8 +5,8 @@ use crate::amount::SplitTarget;
 use crate::dhke::construct_proofs;
 use crate::nuts::nut00::ProofsMethods;
 use crate::nuts::{
-    nut12, MintBolt11Request, MintQuoteBolt11Request, MintQuoteBolt11Response, PreMintSecrets,
-    SpendingConditions, State,
+    nut12, BlindSignature, MintBolt11Request, MintQuoteBolt11Request, MintQuoteBolt11Response,
+    PreMint, PreMintSecrets, SpendingConditions, State,
 };
 use crate::nuts::{CurrencyUnit, Id};
 use crate::types::ProofInfo;
@@ -350,57 +350,52 @@ impl Wallet {
         Ok(premint_secrets)
     }
 
-    // pub async fn gen_ehash_proofs(&self) -> Result<u64, Error> {
-    //     // TODO pass this in, it will break if the keyset changes before getting proofs
-    //     let active_keyset_id = self.get_active_mint_keyset().await?.id;
-    //     let keys = self.get_keyset_keys(active_keyset_id).await?;
+    pub async fn gen_ehash_proofs(
+        &self,
+        sig: BlindSignature,
+        premint: PreMint,
+    ) -> Result<Vec<ProofInfo>, Error> {
+        // TODO pass this in, it will break if the keyset changes before getting proofs
+        let active_keyset_id = self.get_active_mint_keyset_local().await?.id;
+        let keys = self.get_keyset_keys(active_keyset_id).await?;
 
-    //     // Verify the signature DLEQ is valid
-    //     {
-    //         for (sig, premint) in mint_res.signatures.iter().zip(&premint_secrets.secrets) {
-    //             let keys = self.get_keyset_keys(sig.keyset_id).await?;
-    //             let key = keys.amount_key(sig.amount).ok_or(Error::AmountKey)?;
-    //             match sig.verify_dleq(key, premint.blinded_message.blinded_secret) {
-    //                 Ok(_) | Err(nut12::Error::MissingDleqProof) => (),
-    //                 Err(_) => return Err(Error::CouldNotVerifyDleq),
-    //             }
-    //         }
-    //     }
+        // Verify the signature DLEQ is valid
+        {
+            let keys = self.get_keyset_keys(sig.keyset_id).await?;
+            let key = keys.amount_key(sig.amount).ok_or(Error::AmountKey)?;
+            match sig.verify_dleq(key, premint.blinded_message.blinded_secret) {
+                Ok(_) | Err(nut12::Error::MissingDleqProof) => (),
+                Err(_) => return Err(Error::CouldNotVerifyDleq),
+            }
+        }
 
-    //     let proofs = construct_proofs(
-    //         mint_res.signatures,
-    //         premint_secrets.rs(),
-    //         premint_secrets.secrets(),
-    //         &keys,
-    //     )?;
+        let proofs = construct_proofs(vec![sig], vec![premint.r], vec![premint.secret], &keys)?;
 
-    //     let minted_amount = proofs.total_amount()?;
+        let minted_amount = proofs.total_amount()?;
 
-    //     // Remove filled quote from store
-    //     self.localstore.remove_mint_quote(&quote_info.id).await?;
+        // Update counter for keyset
+        self.localstore
+            .increment_keyset_counter(&active_keyset_id, proofs.len() as u32)
+            .await?;
 
-    //     if spending_conditions.is_none() {
-    //         // Update counter for keyset
-    //         self.localstore
-    //             .increment_keyset_counter(&active_keyset_id, proofs.len() as u32)
-    //             .await?;
-    //     }
+        let proofs = proofs
+            .into_iter()
+            .map(|proof| {
+                ProofInfo::new(
+                    proof,
+                    self.mint_url.clone(),
+                    State::Unspent,
+                    CurrencyUnit::Custom("HASH".to_string()),
+                )
+            })
+            .collect::<Result<Vec<ProofInfo>, _>>()?;
 
-    //     let proofs = proofs
-    //         .into_iter()
-    //         .map(|proof| {
-    //             ProofInfo::new(
-    //                 proof,
-    //                 self.mint_url.clone(),
-    //                 State::Unspent,
-    //                 CurrencyUnit::Custom("HASH".to_string()),
-    //             )
-    //         })
-    //         .collect::<Result<Vec<ProofInfo>, _>>()?;
+        // Add new proofs to store
+        self.localstore
+            .update_proofs(proofs.clone(), vec![])
+            .await?;
 
-    //     // Add new proofs to store
-    //     self.localstore.update_proofs(proofs, vec![]).await?;
-
-    //     Ok(minted_amount.into())
-    // }
+        // TODO return amount instead of proofs
+        Ok(proofs)
+    }
 }
