@@ -9,8 +9,8 @@ use cdk::amount::Amount;
 use cdk::cdk_database::{self, WalletDatabase};
 use cdk::mint_url::MintUrl;
 use cdk::nuts::{
-    CurrencyUnit, Id, KeySetInfo, Keys, MeltQuoteState, MintInfo, MintQuoteState, Proof, PublicKey,
-    SpendingConditions, State,
+    CurrencyUnit, Id, KeySetInfo, Keys, MeltQuoteState, MintInfo, MintQuoteState, PreMintSecrets,
+    Proof, PublicKey, SpendingConditions, State,
 };
 use cdk::secret::Secret;
 use cdk::types::ProofInfo;
@@ -777,6 +777,20 @@ VALUES (?, ?);
         .map_err(Error::from)?;
 
         Ok(())
+    }
+
+    async fn add_premint_secrets(
+        &self,
+        quote_id: &str,
+        premint_secrets: &PreMintSecrets,
+    ) -> Result<(), Self::Err> {
+        todo!();
+    }
+    async fn get_premint_secrets(
+        &self,
+        quote_id: &str,
+    ) -> Result<Option<PreMintSecrets>, Self::Err> {
+        todo!();
     }
 }
 

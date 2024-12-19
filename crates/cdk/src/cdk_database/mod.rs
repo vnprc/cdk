@@ -20,6 +20,7 @@ use crate::mint::MintQuote as MintMintQuote;
 use crate::mint_url::MintUrl;
 #[cfg(feature = "mint")]
 use crate::nuts::MeltBolt11Request;
+use crate::nuts::PreMintSecrets;
 #[cfg(feature = "mint")]
 use crate::nuts::{BlindSignature, MeltQuoteState, MintQuoteState, Proof, Proofs};
 #[cfg(any(feature = "wallet", feature = "mint"))]
@@ -170,6 +171,19 @@ pub trait WalletDatabase: Debug {
         verifying_key: PublicKey,
         last_checked: u32,
     ) -> Result<(), Self::Err>;
+
+    /// Store premint secrets
+    async fn add_premint_secrets(
+        &self,
+        quote_id: &str,
+        premint_secrets: &PreMintSecrets,
+    ) -> Result<(), Self::Err>;
+
+    /// Retrieve premint secrets
+    async fn get_premint_secrets(
+        &self,
+        quote_id: &str,
+    ) -> Result<Option<PreMintSecrets>, Self::Err>;
 }
 
 /// Mint Database trait

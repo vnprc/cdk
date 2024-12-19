@@ -10,7 +10,8 @@ use async_trait::async_trait;
 use cdk::cdk_database::WalletDatabase;
 use cdk::mint_url::MintUrl;
 use cdk::nuts::{
-    CurrencyUnit, Id, KeySetInfo, Keys, MintInfo, PublicKey, SpendingConditions, State,
+    CurrencyUnit, Id, KeySetInfo, Keys, MintInfo, PreMintSecrets, PublicKey, SpendingConditions,
+    State,
 };
 use cdk::types::ProofInfo;
 use cdk::util::unix_time;
@@ -740,5 +741,19 @@ impl WalletDatabase for WalletRedbDatabase {
         write_txn.commit().map_err(Error::from)?;
 
         Ok(())
+    }
+
+    async fn add_premint_secrets(
+        &self,
+        quote_id: &str,
+        premint_secrets: &PreMintSecrets,
+    ) -> Result<(), Self::Err> {
+        todo!();
+    }
+    async fn get_premint_secrets(
+        &self,
+        quote_id: &str,
+    ) -> Result<Option<PreMintSecrets>, Self::Err> {
+        todo!();
     }
 }

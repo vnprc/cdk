@@ -6,7 +6,7 @@ use crate::dhke::construct_proofs;
 use crate::nuts::nut00::ProofsMethods;
 use crate::nuts::{
     nut12, BlindSignature, MintBolt11Request, MintQuoteBolt11Request, MintQuoteBolt11Response,
-    PreMint, PreMintSecrets, SpendingConditions, State,
+    PreMintSecrets, SpendingConditions, State,
 };
 use crate::nuts::{CurrencyUnit, Id};
 use crate::types::ProofInfo;
@@ -328,7 +328,31 @@ impl Wallet {
         Ok(minted_amount)
     }
 
-    pub async fn gen_ehash_premint_secrets(&self) -> Result<PreMintSecrets, Error> {
+    pub async fn gen_ehash_premint_secrets(
+        &self,
+        amount: u64,
+        quote_id: &str,
+        mint_url: &str,
+    ) -> Result<PreMintSecrets, Error> {
+        // check for existing quote
+        if let Some(_) = self.localstore.get_mint_quote(quote_id).await? {
+            return Err(Error::PaidQuote);
+        }
+        self.localstore
+            .add_mint_quote(MintQuote {
+                id: quote_id.to_string(),
+                mint_url: mint_url.parse()?,
+                amount: Amount::from(amount),
+                unit: CurrencyUnit::Custom("HASH".to_string()),
+                // TODO what to put here? needs to identify the mining share
+                // probably channel_id:sequence_number
+                request: "todo".to_string(),
+                state: MintQuoteState::Paid,
+                // TODO should we set an expiry?
+                expiry: u64::MAX,
+            })
+            .await?;
+
         let active_keyset_id = self.get_active_mint_keyset_local().await?.id;
 
         let count = self
@@ -347,17 +371,30 @@ impl Wallet {
             count,
         )?;
 
+        self.localstore
+            .add_premint_secrets(quote_id, &premint_secrets)
+            .await?;
+
         Ok(premint_secrets)
     }
 
     pub async fn gen_ehash_proofs(
         &self,
         sig: BlindSignature,
-        premint: PreMint,
-    ) -> Result<Vec<ProofInfo>, Error> {
+        quote_id: &str,
+    ) -> Result<Amount, Error> {
         // TODO pass this in, it will break if the keyset changes before getting proofs
         let active_keyset_id = self.get_active_mint_keyset_local().await?.id;
         let keys = self.get_keyset_keys(active_keyset_id).await?;
+        let premint_secrets = match self.localstore.get_premint_secrets(quote_id).await? {
+            Some(premint_secrets) => premint_secrets,
+            None => return Err(Error::UnknownQuote),
+        };
+
+        if premint_secrets.keyset_id != active_keyset_id {
+            return Err(Error::UnknownKeySet);
+        }
+        let premint = premint_secrets.secrets.first().unwrap().clone();
 
         // Verify the signature DLEQ is valid
         {
@@ -395,7 +432,10 @@ impl Wallet {
             .update_proofs(proofs.clone(), vec![])
             .await?;
 
-        // TODO return amount instead of proofs
-        Ok(proofs)
+        // Remove Quote
+        // TODO handle result
+        self.localstore.remove_mint_quote(quote_id).await;
+
+        Ok(minted_amount)
     }
 }

@@ -10,7 +10,8 @@ use super::WalletDatabase;
 use crate::cdk_database::Error;
 use crate::mint_url::MintUrl;
 use crate::nuts::{
-    CurrencyUnit, Id, KeySetInfo, Keys, MintInfo, PublicKey, SpendingConditions, State,
+    CurrencyUnit, Id, KeySetInfo, Keys, MintInfo, PreMintSecrets, PublicKey, SpendingConditions,
+    State,
 };
 use crate::types::ProofInfo;
 use crate::util::unix_time;
@@ -29,6 +30,7 @@ pub struct WalletMemoryDatabase {
     proofs: Arc<RwLock<HashMap<PublicKey, ProofInfo>>>,
     keyset_counter: Arc<RwLock<HashMap<Id, u32>>>,
     nostr_last_checked: Arc<RwLock<HashMap<PublicKey, u32>>>,
+    premint_secrets: Arc<RwLock<HashMap<String, PreMintSecrets>>>,
 }
 
 impl WalletMemoryDatabase {
@@ -39,6 +41,7 @@ impl WalletMemoryDatabase {
         mint_keys: Vec<Keys>,
         keyset_counter: HashMap<Id, u32>,
         nostr_last_checked: HashMap<PublicKey, u32>,
+        premint_secrets: HashMap<String, PreMintSecrets>,
     ) -> Self {
         Self {
             mints: Arc::new(RwLock::new(HashMap::new())),
@@ -56,6 +59,7 @@ impl WalletMemoryDatabase {
             proofs: Arc::new(RwLock::new(HashMap::new())),
             keyset_counter: Arc::new(RwLock::new(keyset_counter)),
             nostr_last_checked: Arc::new(RwLock::new(nostr_last_checked)),
+            premint_secrets: Arc::new(RwLock::new(premint_secrets)),
         }
     }
 }
@@ -354,5 +358,23 @@ impl WalletDatabase for WalletMemoryDatabase {
             .insert(verifying_key, last_checked);
 
         Ok(())
+    }
+
+    async fn add_premint_secrets(
+        &self,
+        quote_id: &str,
+        premint_secrets: &PreMintSecrets,
+    ) -> Result<(), Self::Err> {
+        self.premint_secrets
+            .write()
+            .await
+            .insert(quote_id.to_string(), premint_secrets.clone());
+        Ok(())
+    }
+    async fn get_premint_secrets(
+        &self,
+        quote_id: &str,
+    ) -> Result<Option<PreMintSecrets>, Self::Err> {
+        Ok(self.premint_secrets.read().await.get(quote_id).cloned())
     }
 }
