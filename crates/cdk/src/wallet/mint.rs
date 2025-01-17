@@ -365,7 +365,7 @@ impl Wallet {
         let premint_secrets = self.generate_premint_secrets(
             active_keyset_id,
             // TODO when do we want to set amount?
-            Amount::from(1),
+            Amount::from(amount),
             &SplitTarget::None,
             None,
             count,
