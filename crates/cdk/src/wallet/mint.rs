@@ -380,7 +380,7 @@ impl Wallet {
 
     pub async fn gen_ehash_proofs(
         &self,
-        sig: BlindSignature,
+        signatures: [Option<BlindSignature>; 64],
         quote_id: &str,
     ) -> Result<Amount, Error> {
         // TODO pass this in, it will break if the keyset changes before getting proofs
@@ -394,23 +394,47 @@ impl Wallet {
         if premint_secrets.keyset_id != active_keyset_id {
             return Err(Error::UnknownKeySet);
         }
-        let premint = premint_secrets.secrets.first().unwrap().clone();
 
-        // Verify the signature DLEQ is valid
-        {
-            let keys = self.get_keyset_keys(sig.keyset_id).await?;
-            let key = keys.amount_key(sig.amount).ok_or(Error::AmountKey)?;
-            match sig.verify_dleq(key, premint.blinded_message.blinded_secret) {
-                Ok(_) | Err(nut12::Error::MissingDleqProof) => (),
-                Err(_) => return Err(Error::CouldNotVerifyDleq),
+        let mut verified_signatures = Vec::new();
+        let mut premint_rs = Vec::new();
+        let mut premint_secrets_vec = Vec::new();
+
+        // verify each signature
+        for sig_opt in signatures.iter() {
+            if let Some(sig) = sig_opt {
+                // Find the secret corresponding to the signature using amount field
+                if let Some(matching_secret) = premint_secrets
+                    .secrets
+                    .iter()
+                    .find(|secret| secret.amount == sig.amount)
+                {
+                    // Ensure the keyset for the signature matches the active keyset
+                    let keys = self.get_keyset_keys(sig.keyset_id).await?;
+                    let key = keys.amount_key(sig.amount).ok_or(Error::AmountKey)?;
+
+                    match sig.verify_dleq(key, matching_secret.blinded_message.blinded_secret) {
+                        Ok(_) | Err(nut12::Error::MissingDleqProof) => {
+                            // Add verified signature and related premint data
+                            verified_signatures.push(sig.clone());
+                            premint_rs.push(matching_secret.r.clone());
+                            premint_secrets_vec.push(matching_secret.secret.clone());
+                        }
+                        Err(_) => return Err(Error::CouldNotVerifyDleq),
+                    }
+                } else {
+                    return Err(Error::Custom(String::from("Secret not found")));
+                }
             }
         }
 
-        let proofs = construct_proofs(vec![sig], vec![premint.r], vec![premint.secret], &keys)?;
+        // Construct proofs
+        let proofs = construct_proofs(verified_signatures, premint_rs, premint_secrets_vec, &keys)?;
+        // TODO rebase to latest master and remove this (proofs are returned now)
+        println!("proofs {:?}", proofs);
 
         let minted_amount = proofs.total_amount()?;
 
-        // Update counter for keyset
+        // update keyset token counter
         self.localstore
             .increment_keyset_counter(&active_keyset_id, proofs.len() as u32)
             .await?;
@@ -427,7 +451,7 @@ impl Wallet {
             })
             .collect::<Result<Vec<ProofInfo>, _>>()?;
 
-        // Add new proofs to store
+        // store new proofs in wallet
         self.localstore
             .update_proofs(proofs.clone(), vec![])
             .await?;
