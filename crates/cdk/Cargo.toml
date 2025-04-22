@@ -31,6 +31,7 @@ bitcoin = { version = "0.32.2", features = [
     "rand",
     "rand-std",
 ] }
+bitcoin_hashes = { version = "0.16", features = ["serde"] }
 ciborium = { version = "0.2.2", default-features = false, features = ["std"] }
 lightning-invoice = { version = "0.32.0", features = ["serde", "std"] }
 regex = "1"
@@ -101,6 +102,7 @@ rand = "0.8.5"
 bip39 = "2.0"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 criterion = "0.5.1"
+cdk-integration-tests = { path = "../cdk-integration-tests" }
 
 [[bench]]
 name = "dhke_benchmarks"

@@ -1,6 +1,6 @@
 use cdk_common::nut04::{MintMiningShareRequest, MintQuoteMiningShareRequest, MintQuoteMiningShareResponse};
 use cdk_common::BlindedMessage;
-use tracing::instrument;
+use tracing::{instrument, debug};
 use uuid::Uuid;
 
 use super::verification::Verification;
@@ -183,8 +183,11 @@ impl Mint {
         };
 
         self.process_mining_mint_request(mint_mining_share_request).await?;
-
-        let quote: MintQuoteMiningShareResponse<Uuid> = quote.into();
+        debug!("Successfully processed mining mint request for quote {}", quote.id);
+      
+        // Update the local quote state to Issued since was updated in process_mining_mint_request
+        let mut quote: MintQuoteMiningShareResponse<Uuid> = quote.into();
+        quote.state = MintQuoteState::Issued;
 
         self.pubsub_manager
             .broadcast(NotificationPayload::MintQuoteMiningShareResponse(quote.clone()));
@@ -534,3 +537,60 @@ impl Mint {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::amount::Amount;
+    use crate::nuts::{CurrencyUnit, MintQuoteState};
+    use cdk_common::nut04::MintQuoteMiningShareRequest;
+    use cdk_integration_tests::init_pure_tests::create_and_start_test_mint;
+    use bitcoin_hashes::sha256::Hash;
+    use cdk_common::nut00::BlindedMessage;
+    use std::collections::HashMap;
+    use anyhow::Result;
+
+    #[tokio::test]
+    async fn test_mint_mining_share_quote_is_issued() -> Result<()> {
+        let mint = create_and_start_test_mint().await?;
+
+        // Rotate keyset to make it active for CurrencyUnit::Sat
+        mint.rotate_keyset(CurrencyUnit::Sat, 0, 32, 0, &HashMap::new()).await?;
+
+        // Create a header hash for the mining share request
+        let header_hash = Hash::hash(b"test_header");
+
+        // Get  active keyset ID, keyset info to get a valid public key
+        let active_keyset_id = mint.localstore.get_active_keyset_id(&CurrencyUnit::Sat).await?.unwrap();
+        let keyset_info = mint.localstore.get_keyset_info(&active_keyset_id).await?.unwrap();
+        let keyset = mint.generate_keyset(keyset_info);
+        
+        // Get the public key for amount 512 (2^9)
+        let amount = Amount::from(512);
+        let valid_public_key = keyset.keys.get(&amount).unwrap().public_key;
+
+        let request = MintQuoteMiningShareRequest {
+            amount: Amount::from(512),
+            unit: CurrencyUnit::Sat,
+            header_hash,
+            description: None,
+            pubkey: None,
+        };
+
+        // Create a minimal blinded message with the same unit
+        let blinded_message = BlindedMessage {
+            amount: Amount::from(512),
+            keyset_id: active_keyset_id,
+            blinded_secret: valid_public_key,
+            witness: None,
+        };
+
+        // Create the quote with the blinded message
+        let quote = mint.create_paid_mint_mining_share_quote(request, vec![blinded_message]).await.unwrap();
+
+        // Verify quote state is Issued
+        assert_eq!(quote.state, MintQuoteState::Issued);
+
+        Ok(())
+    }
+}
+
