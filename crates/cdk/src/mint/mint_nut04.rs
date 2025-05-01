@@ -175,15 +175,8 @@ impl Mint {
         self.localstore.add_mint_quote(quote.clone()).await?;
         // TODO implement block template validation and make this a separate API call
         self.pay_mint_quote(&quote).await?;
-
-        let mint_mining_share_request = MintMiningShareRequest { 
-            quote: quote.id,
-            outputs: blinded_messages,
-            signature: None,
-        };
-
-        self.process_mining_mint_request(mint_mining_share_request).await?;
-
+        tracing::debug!("Successfully created PAID mining mint request for quote {}", quote.id);
+        
         let quote: MintQuoteMiningShareResponse<Uuid> = quote.into();
 
         self.pubsub_manager
