@@ -18,6 +18,7 @@ mod ws;
 
 #[cfg(feature = "swagger")]
 mod swagger_imports {
+    pub use crate::router_handlers::{QuotesSharesQuery, QuotesSharesResponse};
     pub use cdk::amount::Amount;
     pub use cdk::error::{ErrorCode, ErrorResponse};
     pub use cdk::nuts::nut00::{
@@ -99,6 +100,8 @@ pub struct MintState {
         ProofDleq,
         ProofState,
         PublicKey,
+        QuotesSharesQuery,
+        QuotesSharesResponse,
         RestoreRequest,
         RestoreResponse,
         SecretKey,
@@ -125,7 +128,8 @@ pub struct MintState {
         post_melt_bolt11,
         post_swap,
         post_check,
-        post_restore
+        post_restore,
+        get_quotes_shares
     )
 )]
 /// OpenAPI spec for the mint's v1 APIs
@@ -167,7 +171,8 @@ pub async fn create_mint_router_with_custom_cache(
         .route("/melt/bolt11", post(cache_post_melt_bolt11))
         .route("/checkstate", post(post_check))
         .route("/info", get(get_mint_info))
-        .route("/restore", post(post_restore));
+        .route("/restore", post(post_restore))
+        .route("/mint/quote-ids/share", get(get_quotes_shares));
 
     let mint_router = Router::new().nest("/v1", v1_router).with_state(state);
 

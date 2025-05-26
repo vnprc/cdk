@@ -1,6 +1,6 @@
 use anyhow::Result;
 use axum::extract::ws::WebSocketUpgrade;
-use axum::extract::{Json, Path, State};
+use axum::extract::{Json, Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use cdk::error::ErrorResponse;
@@ -12,6 +12,8 @@ use cdk::nuts::{
 };
 use cdk::util::unix_time;
 use paste::paste;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use tracing::instrument;
 use uuid::Uuid;
 
@@ -407,6 +409,108 @@ pub async fn post_restore(
     })?;
 
     Ok(Json(restore_response))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct QuotesSharesQuery {
+    /// Comma-separated list of share hashes
+    pub share_hashes: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct QuotesSharesResponse {
+    /// Share hash -> quote ID mapping
+    pub quote_ids: HashMap<String, String>,
+}
+
+#[cfg_attr(feature = "swagger", utoipa::path(
+    get,
+    context_path = "/v1",
+    path = "/mint/quote-ids/share",
+    params(
+        ("share_hashes" = String, Query, description = "Comma-separated list of quote IDs")
+    ),
+    responses(
+        (status = 200, description = "Successful response", body = QuotesSharesResponse, content_type = "application/json"),
+        (status = 500, description = "Server error", body = ErrorResponse, content_type = "application/json")
+    )
+))]
+/// Get UUIDs for share hashes from Redis
+///
+/// Fetches quote IDs for the provided share hashes from Redis cache.
+pub async fn get_quotes_shares(
+    State(state): State<MintState>,
+    Query(params): Query<QuotesSharesQuery>,
+) -> Result<Json<QuotesSharesResponse>, Response> {
+    let share_hashes: Vec<String> = params
+        .share_hashes
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    tracing::info!("Processing share_hashes: {:?}", share_hashes);
+
+    let mut quote_ids = HashMap::new();
+
+    #[cfg(feature = "redis")]
+    {
+        use redis::AsyncCommands;
+
+        if let Some(redis_client) = get_redis_client().await {
+            tracing::info!("Got Redis client");
+            let mut conn = match redis_client.get_multiplexed_tokio_connection().await {
+                Ok(conn) => {
+                    conn
+                }
+                Err(err) => {
+                    tracing::error!("Failed to get redis connection: {:?}", err);
+                    return Err(into_response(cdk::error::Error::Custom(
+                        "Failed to connect to Redis".to_string(),
+                    )));
+                }
+            };
+
+            for share_hash in share_hashes {
+                let key = format!("mint:quotes:hash:{}", share_hash);
+                tracing::info!("Looking up key: {}", key);
+                match conn.get::<String, Option<String>>(key).await {
+                    Ok(Some(uuid_str)) => {
+                        quote_ids.insert(share_hash, uuid_str);
+                    }
+                    Ok(None) => {
+                        tracing::warn!("No quote found for share hash: {}", share_hash);
+                    }
+                    Err(err) => {
+                        tracing::error!("Failed to get value from redis: {:?}", err);
+                    }
+                }
+            }
+        } else {
+            tracing::warn!("No Redis client available from cache");
+        }
+    }
+
+    #[cfg(not(feature = "redis"))]
+    {
+        tracing::warn!("Redis feature not enabled, cannot lookup quotes");
+    }
+
+    tracing::info!("Returning quote_ids: {:?}", quote_ids);
+    Ok(Json(QuotesSharesResponse { quote_ids }))
+}
+
+#[cfg(feature = "redis")]
+async fn get_redis_client() -> Option<redis::Client> {
+    // For now, we'll create a new Redis client each time this function is called.
+    // This should be replaced with a better solution in the future
+
+    // Try to get Redis connection string from environment or default
+    let redis_url = std::env::var("REDIS_URL")
+        .or_else(|_| std::env::var("REDIS_CONNECTION_STRING"))
+        .unwrap_or_else(|_| "redis://localhost:6379".to_string());
+
+    redis::Client::open(redis_url).ok()
 }
 
 pub fn into_response<T>(error: T) -> Response
