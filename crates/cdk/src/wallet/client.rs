@@ -13,6 +13,7 @@ use url::Url;
 use super::Error;
 use crate::error::ErrorResponse;
 use crate::mint_url::MintUrl;
+use cdk_common::QuotesSharesResponse;
 use crate::nuts::{
     CheckStateRequest, CheckStateResponse, Id, KeySet, KeysResponse, KeysetResponse,
     MeltBolt11Request, MeltQuoteBolt11Request, MeltQuoteBolt11Response, MintBolt11Request,
@@ -251,6 +252,18 @@ impl MintConnector for HttpClient {
         let url = self.mint_url.join_paths(&["v1", "restore"])?;
         self.http_post(url, &request).await
     }
+
+    /// Get quote IDs for share hashes
+    #[instrument(skip(self, share_hashes), fields(mint_url = %self.mint_url))]
+    async fn get_quotes_shares(&self, share_hashes: Vec<String>) -> Result<QuotesSharesResponse, Error> {
+        let share_hashes_str = share_hashes.join(",");
+        let mut url = self
+            .mint_url
+            .join_paths(&["v1", "mint", "quote-ids", "share"])?;
+
+        url.set_query(Some(&format!("share_hashes={}", share_hashes_str)));
+        self.http_get(url).await
+    }
 }
 
 /// Interface that connects a wallet to a mint. Typically represents an [HttpClient].
@@ -305,4 +318,6 @@ pub trait MintConnector: Debug {
     ) -> Result<CheckStateResponse, Error>;
     /// Restore request [NUT-13]
     async fn post_restore(&self, request: RestoreRequest) -> Result<RestoreResponse, Error>;
+    /// Get quote IDs for share hashes
+    async fn get_quotes_shares(&self, share_hashes: Vec<String>) -> Result<QuotesSharesResponse, Error>;
 }

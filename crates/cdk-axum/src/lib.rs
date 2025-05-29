@@ -18,7 +18,7 @@ mod ws;
 
 #[cfg(feature = "swagger")]
 mod swagger_imports {
-    pub use crate::router_handlers::{QuotesSharesQuery, QuotesSharesResponse};
+    pub use cdk_common::{QuotesSharesQuery, QuotesSharesResponse};
     pub use cdk::amount::Amount;
     pub use cdk::error::{ErrorCode, ErrorResponse};
     pub use cdk::nuts::nut00::{
