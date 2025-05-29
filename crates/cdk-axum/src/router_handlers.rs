@@ -11,8 +11,8 @@ use cdk::nuts::{
     SwapRequest, SwapResponse,
 };
 use cdk::util::unix_time;
+use cdk_common::{QuotesSharesQuery, QuotesSharesResponse};
 use paste::paste;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tracing::instrument;
 use uuid::Uuid;
@@ -409,18 +409,6 @@ pub async fn post_restore(
     })?;
 
     Ok(Json(restore_response))
-}
-
-#[derive(Debug, Deserialize)]
-pub struct QuotesSharesQuery {
-    /// Comma-separated list of share hashes
-    pub share_hashes: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct QuotesSharesResponse {
-    /// Share hash -> quote ID mapping
-    pub quote_ids: HashMap<String, String>,
 }
 
 #[cfg_attr(feature = "swagger", utoipa::path(

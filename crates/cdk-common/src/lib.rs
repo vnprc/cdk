@@ -7,6 +7,7 @@
 //! internal crates.
 
 pub mod common;
+pub use common::{QuotesSharesQuery, QuotesSharesResponse};
 pub mod database;
 pub mod error;
 #[cfg(feature = "mint")]

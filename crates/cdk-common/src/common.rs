@@ -1,5 +1,6 @@
 //! Types
 
+use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::error::Error;
@@ -171,6 +172,20 @@ impl QuoteTTL {
     pub fn new(mint_ttl: u64, melt_ttl: u64) -> QuoteTTL {
         Self { mint_ttl, melt_ttl }
     }
+}
+
+/// Query parameters for getting quote IDs from share hashes
+#[derive(Debug, Deserialize)]
+pub struct QuotesSharesQuery {
+    /// Comma-separated list of share hashes
+    pub share_hashes: String,
+}
+
+/// Response containing quote ID mappings for share hashes
+#[derive(Debug, Serialize, Deserialize)]
+pub struct QuotesSharesResponse {
+    /// Share hash -> quote ID mapping
+    pub quote_ids: HashMap<String, String>,
 }
 
 #[cfg(test)]
