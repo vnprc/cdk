@@ -648,6 +648,7 @@ pub enum PaymentMethod {
     /// Bolt11 payment type
     #[default]
     Bolt11,
+    MiningShare,
     /// Custom
     Custom(String),
 }
@@ -666,6 +667,7 @@ impl fmt::Display for PaymentMethod {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             PaymentMethod::Bolt11 => write!(f, "bolt11"),
+            PaymentMethod::MiningShare => write!(f, "mining_share"),
             PaymentMethod::Custom(p) => write!(f, "{p}"),
         }
     }

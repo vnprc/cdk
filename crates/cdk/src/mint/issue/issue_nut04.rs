@@ -1,4 +1,9 @@
+use cdk_common::nutXX::{
+    MintMiningShareRequest, MintMiningShareResponse, MintQuoteMiningShareRequest,
+    MintQuoteMiningShareResponse, QuoteState,
+};
 use cdk_common::payment::Bolt11Settings;
+use cdk_common::BlindedMessage;
 use tracing::instrument;
 use uuid::Uuid;
 
@@ -295,6 +300,195 @@ impl Mint {
             .mint_quote_bolt11_status(mint_quote, MintQuoteState::Issued);
 
         Ok(MintResponse {
+            signatures: blind_signatures,
+        })
+    }
+
+    /// Create new mint mining share quote
+    #[instrument(skip_all)]
+    pub async fn create_paid_mint_mining_share_quote(
+        &self,
+        mint_quote_request: MintQuoteMiningShareRequest,
+        blinded_messages: Vec<BlindedMessage>,
+    ) -> Result<MintQuoteMiningShareResponse<Uuid>, Error> {
+        let MintQuoteMiningShareRequest {
+            amount,
+            unit,
+            header_hash,
+            description,
+            pubkey,
+        } = mint_quote_request;
+
+        // TODO fix this function, it is hard coded to bolt11
+        // self.check_mint_request_acceptable(amount, &unit).await?;
+
+        let mint_ttl = self.localstore.get_quote_ttl().await?.mint_ttl;
+
+        let quote_expiry = unix_time() + mint_ttl;
+
+        let quote = MintQuote::new(
+            header_hash.to_string(),
+            unit.clone(),
+            amount,
+            quote_expiry,
+            // TODO is there a better request lookup ID?
+            header_hash.to_string(),
+            pubkey,
+        );
+
+        tracing::debug!(
+            "New mint quote {} for {} {} with request id {}",
+            quote.id,
+            amount,
+            unit,
+            header_hash,
+        );
+
+        self.localstore.add_mint_quote(quote.clone()).await?;
+        // TODO implement block template validation and make this a separate API call
+        self.pay_mint_quote(&quote).await?;
+        tracing::debug!(
+            "Successfully created PAID mining mint request for quote {}",
+            quote.id
+        );
+
+        // let quote: MintQuoteMiningShareResponse<Uuid> = quote.into();
+        let quote_response = MintQuoteMiningShareResponse {
+            quote: quote.id,
+            request: quote.request.clone(),
+            // TODO clean this up, can we implement a From trait?
+            // i had trouble with foreign trait definitions and circular dependencies pinning me in on both sides
+            state: match quote.state {
+                MintQuoteState::Unpaid => QuoteState::Unpaid,
+                MintQuoteState::Paid => QuoteState::Paid,
+                MintQuoteState::Pending => QuoteState::Pending,
+                MintQuoteState::Issued => QuoteState::Issued,
+            },
+            expiry: Some(quote.expiry),
+            pubkey: quote.pubkey.clone(),
+            amount: Some(quote.amount.clone()),
+            unit: Some(quote.unit.clone()),
+        };
+
+        // self.pubsub_manager
+        //     .broadcast(NotificationPayload::MintQuoteMiningShareResponse(quote.clone()));
+
+        Ok(quote_response)
+    }
+
+    // TODO this is a cheap copy of process_mint_request, DRY this function and that one
+    /// Process mining mint request
+    #[instrument(skip_all)]
+    pub async fn process_mining_mint_request(
+        &self,
+        mint_request: MintMiningShareRequest<Uuid>,
+    ) -> Result<MintMiningShareResponse, Error> {
+        let mint_quote =
+            if let Some(mint_quote) = self.localstore.get_mint_quote(&mint_request.quote).await? {
+                mint_quote
+            } else {
+                return Err(Error::UnknownQuote);
+            };
+
+        let state = self
+            .localstore
+            .update_mint_quote_state(&mint_request.quote, MintQuoteState::Pending)
+            .await?;
+
+        let state = if state == MintQuoteState::Unpaid {
+            self.check_mint_quote_paid(&mint_quote.id).await?
+        } else {
+            state
+        };
+
+        match state {
+            MintQuoteState::Unpaid => {
+                let _state = self
+                    .localstore
+                    .update_mint_quote_state(&mint_request.quote, MintQuoteState::Unpaid)
+                    .await?;
+                return Err(Error::UnpaidQuote);
+            }
+            MintQuoteState::Pending => {
+                return Err(Error::PendingQuote);
+            }
+            MintQuoteState::Issued => {
+                let _state = self
+                    .localstore
+                    .update_mint_quote_state(&mint_request.quote, MintQuoteState::Issued)
+                    .await?;
+                return Err(Error::IssuedQuote);
+            }
+            MintQuoteState::Paid => (),
+        }
+
+        // If the there is a public key provoided in mint quote request
+        // verify the signature is provided for the mint request
+        if let Some(pubkey) = mint_quote.pubkey {
+            mint_request.verify_signature(pubkey)?;
+        }
+
+        let Verification { amount, unit } = match self.verify_outputs(&mint_request.outputs).await {
+            Ok(verification) => verification,
+            Err(err) => {
+                tracing::debug!("Could not verify mint outputs");
+                self.localstore
+                    .update_mint_quote_state(&mint_request.quote, MintQuoteState::Paid)
+                    .await?;
+
+                return Err(err);
+            }
+        };
+
+        let total = match mint_request.total_amount() {
+            Ok(val) => val,
+            Err(_) => return Err(Error::TransactionUnbalanced(mint_quote.amount.into(), 0, 0)),
+        };
+
+        // We check the total value of blinded messages == mint quote
+        if amount != mint_quote.amount {
+            return Err(Error::TransactionUnbalanced(
+                mint_quote.amount.into(),
+                total.into(),
+                0,
+            ));
+        }
+
+        if let Some(unit) = unit {
+            if unit != mint_quote.unit {
+                return Err(Error::UnsupportedUnit);
+            }
+        } else {
+            return Err(Error::UnsupportedUnit);
+        }
+
+        let mut blind_signatures = Vec::with_capacity(mint_request.outputs.len());
+
+        for blinded_message in mint_request.outputs.iter() {
+            let blind_signature = self.blind_sign(blinded_message.clone()).await?;
+            blind_signatures.push(blind_signature);
+        }
+
+        self.localstore
+            .add_blind_signatures(
+                &mint_request
+                    .outputs
+                    .iter()
+                    .map(|p| p.blinded_secret)
+                    .collect::<Vec<PublicKey>>(),
+                &blind_signatures,
+                Some(mint_request.quote),
+            )
+            .await?;
+
+        self.localstore
+            .update_mint_quote_state(&mint_request.quote, MintQuoteState::Issued)
+            .await?;
+
+        // self.pubsub_manager
+        //     .mint_mining_quote_status(mint_quote, MintQuoteState::Issued);
+
+        Ok(MintMiningShareResponse {
             signatures: blind_signatures,
         })
     }

@@ -48,6 +48,11 @@ async fn convert_subscription(
                 subscribed_to.insert(id, (sub.0.clone(), sub.1.id.clone(), AnyState::Empty));
             }
         }
+        Kind::MiningShareMintQuote => {
+            for id in sub.1.filters.iter().map(|id| UrlType::Mint(id.clone())) {
+                subscribed_to.insert(id, (sub.0.clone(), sub.1.id.clone(), AnyState::Empty));
+            }
+        }
         Kind::ProofState => {
             for id in sub
                 .1

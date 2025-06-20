@@ -48,6 +48,12 @@ impl OnNewSubscription for OnSubscription {
                 Notification::MintQuoteBolt11(uuid) => {
                     mint_queries.push(datastore.get_mint_quote(uuid))
                 }
+                Notification::MeltQuoteMiningShare(uuid) => {
+                    melt_queries.push(datastore.get_melt_quote(uuid))
+                }
+                Notification::MintQuoteMiningShare(uuid) => {
+                    mint_queries.push(datastore.get_mint_quote(uuid))
+                }
             }
         }
 

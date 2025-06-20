@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 #[cfg(feature = "mint")]
 use super::PublicKey;
+use crate::nutXX::{MeltQuoteMiningShareResponse, MintQuoteMiningShareResponse};
 use crate::nuts::{
     CurrencyUnit, MeltQuoteBolt11Response, MintQuoteBolt11Response, PaymentMethod, ProofState,
 };
@@ -98,6 +99,10 @@ pub enum NotificationPayload<T> {
     MeltQuoteBolt11Response(MeltQuoteBolt11Response<T>),
     /// Mint Quote Bolt11 Response
     MintQuoteBolt11Response(MintQuoteBolt11Response<T>),
+    /// Melt Quote mining share Response
+    MeltQuoteMiningShareResponse(MeltQuoteMiningShareResponse<T>),
+    /// Mint Quote mining share Response
+    MintQuoteMiningShareResponse(MintQuoteMiningShareResponse<T>),
 }
 
 impl<T> From<ProofState> for NotificationPayload<T> {
@@ -118,6 +123,18 @@ impl<T> From<MintQuoteBolt11Response<T>> for NotificationPayload<T> {
     }
 }
 
+impl<T> From<MeltQuoteMiningShareResponse<T>> for NotificationPayload<T> {
+    fn from(melt_quote: MeltQuoteMiningShareResponse<T>) -> NotificationPayload<T> {
+        NotificationPayload::MeltQuoteMiningShareResponse(melt_quote)
+    }
+}
+
+impl<T> From<MintQuoteMiningShareResponse<T>> for NotificationPayload<T> {
+    fn from(mint_quote: MintQuoteMiningShareResponse<T>) -> NotificationPayload<T> {
+        NotificationPayload::MintQuoteMiningShareResponse(mint_quote)
+    }
+}
+
 #[cfg(feature = "mint")]
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 /// A parsed notification
@@ -128,6 +145,11 @@ pub enum Notification {
     MeltQuoteBolt11(Uuid),
     /// MintQuote id is an Uuid
     MintQuoteBolt11(Uuid),
+    // TODO is this correct? idk
+    /// MeltQuote id is an Uuid
+    MeltQuoteMiningShare(Uuid),
+    /// MintQuote id is an Uuid
+    MintQuoteMiningShare(Uuid),
 }
 
 /// Kind
@@ -140,6 +162,8 @@ pub enum Kind {
     Bolt11MintQuote,
     /// Proof State
     ProofState,
+    /// Mining Share
+    MiningShareMintQuote,
 }
 
 impl<I> AsRef<I> for Params<I> {

@@ -14,8 +14,8 @@ use cdk_common::nuts::{MeltQuoteState, MintQuoteState};
 use cdk_common::secret::Secret;
 use cdk_common::wallet::{self, MintQuote, Transaction, TransactionDirection, TransactionId};
 use cdk_common::{
-    database, Amount, CurrencyUnit, Id, KeySet, KeySetInfo, Keys, MintInfo, Proof, ProofDleq,
-    PublicKey, SecretKey, SpendingConditions, State,
+    database, Amount, CurrencyUnit, Id, KeySet, KeySetInfo, Keys, MintInfo, PreMintSecrets, Proof,
+    ProofDleq, PublicKey, SecretKey, SpendingConditions, State,
 };
 use error::Error;
 use tracing::instrument;
@@ -879,6 +879,21 @@ ON CONFLICT(id) DO UPDATE SET
             .map_err(Error::Sqlite)?;
 
         Ok(())
+    }
+
+    async fn add_premint_secrets(
+        &self,
+        quote_id: &str,
+        premint_secrets: &PreMintSecrets,
+    ) -> Result<(), Self::Err> {
+        todo!()
+    }
+
+    async fn get_premint_secrets(
+        &self,
+        quote_id: &str,
+    ) -> Result<Option<PreMintSecrets>, Self::Err> {
+        todo!()
     }
 }
 
