@@ -274,7 +274,7 @@
                 echo "Docker is available at $(which docker)"
                 echo "Docker version: $(docker --version)"
               '';
-              buildInputs = buildInputs ++ [ 
+              buildInputs = buildInputs ++ [
                 stable_toolchain
                 pkgs.docker-client
               ];

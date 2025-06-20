@@ -18,6 +18,7 @@ use cdk::nuts::{
     MintQuoteBolt11Response, MintRequest, MintResponse, PaymentMethod, RestoreRequest,
     RestoreResponse, SwapRequest, SwapResponse,
 };
+use cdk::types::QuotesSharesResponse;
 use cdk::types::{FeeReserve, QuoteTTL};
 use cdk::util::unix_time;
 use cdk::wallet::{AuthWallet, MintConnector, Wallet, WalletBuilder};
@@ -151,6 +152,13 @@ impl MintConnector for DirectMintConnection {
         let mut auth_wallet = self.auth_wallet.write().await;
 
         *auth_wallet = wallet;
+    }
+
+    async fn get_quotes_shares(
+        &self,
+        share_hashes: Vec<String>,
+    ) -> Result<QuotesSharesResponse, cdk::Error> {
+        todo!();
     }
 }
 
