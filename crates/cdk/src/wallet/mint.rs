@@ -1,9 +1,12 @@
 use std::collections::HashMap;
 
+use bitcoin_hashes::sha256::Hash;
 use cdk_common::nut04::MintMethodOptions;
-use cdk_common::wallet::{Transaction, TransactionDirection};
+use cdk_common::nutXX::{MintQuoteMiningShareRequest, MintQuoteMiningShareResponse};
+use cdk_common::wallet::{MintQuote as WalletMintQuote, Transaction, TransactionDirection};
 use cdk_common::{CurrencyUnit, Id};
 use tracing::instrument;
+use uuid::Uuid;
 
 use super::MintQuote;
 use crate::amount::SplitTarget;
@@ -94,6 +97,83 @@ impl Wallet {
         };
 
         self.localstore.add_mint_quote(quote.clone()).await?;
+
+        Ok(quote)
+    }
+
+    /// Create new mint mining share quote
+    #[instrument(skip_all)]
+    pub async fn get_mint_mining_share_quote(
+        &self,
+        mint_quote_request: MintQuoteMiningShareRequest,
+    ) -> Result<WalletMintQuote, Error> {
+        let MintQuoteMiningShareRequest {
+            amount,
+            unit,
+            header_hash,
+            description,
+            pubkey,
+        } = mint_quote_request;
+
+        // self.check_mint_request_acceptable(amount, &unit).await?;
+
+        // let ln = self.get_payment_processor(unit.clone(), PaymentMethod::Bolt11)?;
+
+        //TODO 5 minutes? idk, just pick a number
+        let mint_ttl = 600_000; //self.localstore.get_quote_ttl().await?.mint_ttl;
+
+        let quote_expiry = unix_time() + mint_ttl;
+
+        // let settings = ln.get_settings().await?;
+        // let settings: Bolt11Settings = serde_json::from_value(settings)?;
+
+        // if description.is_some() && !settings.invoice_description {
+        //     tracing::error!("Backend does not support invoice description");
+        //     return Err(Error::InvoiceDescriptionUnsupported);
+        // }
+
+        // let create_invoice_response = ln
+        //     .create_incoming_payment_request(
+        //         amount,
+        //         &unit,
+        //         description.unwrap_or("".to_string()),
+        //         Some(quote_expiry),
+        //     )
+        //     .await
+        //     .map_err(|err| {
+        //         tracing::error!("Could not create invoice: {}", err);
+        //         Error::InvalidPaymentRequest
+        //     })?;
+
+        // TODO get ttl from somewhere else
+        let mint_ttl = 500_000;
+        let expiry = unix_time() + mint_ttl;
+        let now = unix_time();
+
+        let quote = MintQuote {
+            // will be overwritten by the mint
+            id: header_hash.to_string(),
+            mint_url: self.mint_url.clone(),
+            amount: amount,
+            unit: unit.clone(),
+            request: header_hash.to_string(),
+            state: MintQuoteState::Paid,
+            expiry,
+            secret_key: None,
+        };
+
+        tracing::debug!(
+            "New mint quote {} for {} {} with request id {}",
+            quote.id,
+            amount,
+            unit,
+            header_hash.to_string(),
+        );
+
+        self.localstore.add_mint_quote(quote.clone()).await?;
+
+        // self.pubsub_manager
+        //     .broadcast(NotificationPayload::MintQuoteBolt11Response(quote.clone()));
 
         Ok(quote)
     }
@@ -370,17 +450,22 @@ impl Wallet {
             return Err(Error::PaidQuote);
         }
 
-        // Create and store a new mint quote
-        let mint_quote = MintQuote {
-            id: quote_id.to_string(),
-            mint_url: mint_url.parse()?,
+        // TODO prob can't convert string to bytes like that
+        let header_hash = Hash::hash(quote_id.as_bytes());
+
+        let mint_quote_request = MintQuoteMiningShareRequest {
             amount: Amount::from(amount),
             unit: currency_unit,
-            request: "todo".to_string(), // TODO: what does request do?
-            state: MintQuoteState::Paid,
-            expiry: u64::MAX, // TODO: expiry param?
-            secret_key: None,
+            header_hash,
+            description: None,
+            pubkey: None,
         };
+
+        // Create and store a new mint quote
+        let mint_quote = self
+            .get_mint_mining_share_quote(mint_quote_request)
+            .await
+            .unwrap();
 
         self.localstore.add_mint_quote(mint_quote).await?;
 

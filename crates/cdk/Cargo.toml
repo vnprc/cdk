@@ -41,6 +41,7 @@ url.workspace = true
 utoipa = { workspace = true, optional = true }
 uuid.workspace = true
 jsonwebtoken = { workspace = true, optional = true }
+bitcoin_hashes = { version = "0.16", features = ["serde"] }
 
 # -Z minimal-versions
 sync_wrapper = "0.1.2"
