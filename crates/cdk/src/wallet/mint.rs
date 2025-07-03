@@ -442,7 +442,6 @@ impl Wallet {
         &self,
         amount: u64,
         quote_id: &str,
-        mint_url: &str,
         currency_unit: CurrencyUnit,
     ) -> Result<PreMintSecrets, Error> {
         // Ensure the quote does not already exist
