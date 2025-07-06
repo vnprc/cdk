@@ -886,14 +886,103 @@ ON CONFLICT(id) DO UPDATE SET
         quote_id: &str,
         premint_secrets: &PreMintSecrets,
     ) -> Result<(), Self::Err> {
-        todo!()
+        let secrets_json = serde_json::to_string(premint_secrets).map_err(Error::from)?;
+
+        Statement::new(
+            r#"
+            INSERT INTO premint_secrets (quote_id, secrets)
+            VALUES (:quote_id, :secrets)
+            ON CONFLICT(quote_id) DO UPDATE SET
+                secrets = excluded.secrets
+            "#,
+        )
+        .bind(":quote_id", quote_id.to_string())
+        .bind(":secrets", secrets_json)
+        .execute(&self.pool.get().map_err(Error::Pool)?)
+        .map_err(Error::Sqlite)?;
+
+        Ok(())
     }
 
     async fn get_premint_secrets(
         &self,
         quote_id: &str,
     ) -> Result<Option<PreMintSecrets>, Self::Err> {
-        todo!()
+        let result = Statement::new(
+            r#"
+            SELECT secrets 
+            FROM premint_secrets 
+            WHERE quote_id = :quote_id
+            "#,
+        )
+        .bind(":quote_id", quote_id.to_string())
+        .plunk(&self.pool.get().map_err(Error::Pool)?)
+        .map_err(Error::Sqlite)?;
+
+        match result {
+            Some(secrets_column) => {
+                let secrets_str = column_as_string!(secrets_column);
+                let premint_secrets: PreMintSecrets =
+                    serde_json::from_str(&secrets_str).map_err(Error::from)?;
+                Ok(Some(premint_secrets))
+            }
+            None => Ok(None),
+        }
+    }
+
+    async fn add_mint_quote_with_premint_secrets(
+        &self,
+        quote: wallet::MintQuote,
+        premint_secrets: &PreMintSecrets,
+    ) -> Result<(), Self::Err> {
+        let conn = self.pool.get().map_err(Error::Pool)?;
+
+        // Add mint quote
+        Statement::new(
+            r#"
+INSERT INTO mint_quote
+(id, mint_url, amount, unit, request, state, expiry, secret_key)
+VALUES
+(:id, :mint_url, :amount, :unit, :request, :state, :expiry, :secret_key)
+ON CONFLICT(id) DO UPDATE SET
+    mint_url = excluded.mint_url,
+    amount = excluded.amount,
+    unit = excluded.unit,
+    request = excluded.request,
+    state = excluded.state,
+    expiry = excluded.expiry,
+    secret_key = excluded.secret_key
+;
+        "#,
+        )
+        .bind(":id", quote.id.to_string())
+        .bind(":mint_url", quote.mint_url.to_string())
+        .bind(":amount", u64::from(quote.amount) as i64)
+        .bind(":unit", quote.unit.to_string())
+        .bind(":request", quote.request)
+        .bind(":state", quote.state.to_string())
+        .bind(":expiry", quote.expiry as i64)
+        .bind(":secret_key", quote.secret_key.map(|p| p.to_string()))
+        .execute(&conn)
+        .map_err(Error::Sqlite)?;
+
+        // Add premint secrets using the same connection
+        let secrets_json = serde_json::to_string(premint_secrets).map_err(Error::from)?;
+
+        Statement::new(
+            r#"
+            INSERT INTO premint_secrets (quote_id, secrets)
+            VALUES (:quote_id, :secrets)
+            ON CONFLICT(quote_id) DO UPDATE SET
+                secrets = excluded.secrets
+            "#,
+        )
+        .bind(":quote_id", quote.id.to_string())
+        .bind(":secrets", secrets_json)
+        .execute(&conn)
+        .map_err(Error::Sqlite)?;
+
+        Ok(())
     }
 }
 
@@ -1225,5 +1314,120 @@ mod tests {
         assert_eq!(retrieved_dleq.e.to_string(), e.to_string());
         assert_eq!(retrieved_dleq.s.to_string(), s.to_string());
         assert_eq!(retrieved_dleq.r.to_string(), r.to_string());
+    }
+
+    // Helper functions for PreMintSecrets tests
+    use cdk_common::{wallet, Id};
+    use std::str::FromStr;
+
+    async fn create_test_db() -> WalletSqliteDatabase {
+        let path = std::env::temp_dir()
+            .to_path_buf()
+            .join(format!("cdk-test-premint-{}.sqlite", uuid::Uuid::new_v4()));
+
+        #[cfg(feature = "sqlcipher")]
+        let db = WalletSqliteDatabase::new(path, "password".to_string())
+            .await
+            .unwrap();
+
+        #[cfg(not(feature = "sqlcipher"))]
+        let db = WalletSqliteDatabase::new(path).await.unwrap();
+
+        db
+    }
+
+    async fn create_test_quote(db: &WalletSqliteDatabase, quote_id: &str) -> wallet::MintQuote {
+        use cdk_common::mint_url::MintUrl;
+        use cdk_common::nuts::{CurrencyUnit, MintQuoteState};
+        use cdk_common::{Amount, SecretKey};
+        use std::str::FromStr;
+
+        let mint_url = MintUrl::from_str("https://mint.example.com").unwrap();
+        let quote = wallet::MintQuote {
+            id: quote_id.to_string(),
+            mint_url: mint_url.clone(),
+            amount: Amount::from(100),
+            unit: CurrencyUnit::Sat,
+            request: "test_request".to_string(),
+            state: MintQuoteState::Unpaid,
+            expiry: 1234567890,
+            secret_key: Some(SecretKey::generate()),
+        };
+
+        db.add_mint_quote(quote.clone()).await.unwrap();
+        quote
+    }
+
+    #[tokio::test]
+    async fn test_premint_secrets_storage_and_retrieval() {
+        use cdk_common::PreMintSecrets;
+
+        let db = create_test_db().await;
+        let quote = create_test_quote(&db, "test_quote_123").await;
+
+        let premint_secrets = PreMintSecrets::new(Id::from_str("00deadbeef123456").unwrap());
+
+        db.add_premint_secrets(&quote.id, &premint_secrets)
+            .await
+            .unwrap();
+
+        let retrieved_secrets = db.get_premint_secrets(&quote.id).await.unwrap().unwrap();
+
+        let original_json = serde_json::to_string(&premint_secrets).unwrap();
+        let retrieved_json = serde_json::to_string(&retrieved_secrets).unwrap();
+        assert_eq!(original_json, retrieved_json);
+    }
+
+    #[tokio::test]
+    async fn test_premint_secrets_nonexistent_quote() {
+        let db = create_test_db().await;
+
+        let result = db.get_premint_secrets("nonexistent_quote").await.unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_premint_secrets_update() {
+        use cdk_common::PreMintSecrets;
+
+        let db = create_test_db().await;
+        let quote = create_test_quote(&db, "test_quote_update").await;
+
+        let first_secrets = PreMintSecrets::new(Id::from_str("00deadbeef123456").unwrap());
+        db.add_premint_secrets(&quote.id, &first_secrets)
+            .await
+            .unwrap();
+
+        let second_secrets = PreMintSecrets::new(Id::from_str("00deadbeef654321").unwrap());
+        db.add_premint_secrets(&quote.id, &second_secrets)
+            .await
+            .unwrap();
+
+        let retrieved_secrets = db.get_premint_secrets(&quote.id).await.unwrap().unwrap();
+
+        let second_json = serde_json::to_string(&second_secrets).unwrap();
+        let retrieved_json = serde_json::to_string(&retrieved_secrets).unwrap();
+        assert_eq!(second_json, retrieved_json);
+
+        let first_json = serde_json::to_string(&first_secrets).unwrap();
+        assert_ne!(first_json, retrieved_json);
+    }
+
+    #[tokio::test]
+    async fn test_premint_secrets_foreign_key_constraint() {
+        use cdk_common::PreMintSecrets;
+
+        let db = create_test_db().await;
+
+        // Try to add premint secrets for a quote that doesn't exist
+        let premint_secrets = PreMintSecrets::new(Id::from_str("00deadbeef123456").unwrap());
+        let result = db
+            .add_premint_secrets("nonexistent_quote", &premint_secrets)
+            .await;
+
+        // Should fail with foreign key constraint error
+        assert!(result.is_err());
+        let error_string = format!("{:?}", result.unwrap_err());
+        assert!(error_string.contains("FOREIGN KEY constraint failed"));
     }
 }

@@ -21,8 +21,9 @@ use cdk_common::secret::Secret;
 use cdk_common::state::check_state_transition;
 use cdk_common::util::unix_time;
 use cdk_common::{
-    Amount, BlindSignature, BlindSignatureDleq, CurrencyUnit, Id, MeltQuoteState, MintInfo,
-    MintQuoteState, Proof, Proofs, PublicKey, SecretKey, State,
+    Amount, BlindSignature, BlindSignatureDleq, BlindedMessage, CurrencyUnit, Id, MeltQuoteState,
+    MeltRequest, MintInfo, MintQuoteState, PaymentMethod, Proof, Proofs, PublicKey, SecretKey,
+    State,
 };
 use error::Error;
 use lightning_invoice::Bolt11Invoice;
@@ -321,15 +322,20 @@ impl<'a> MintQuotesTransaction<'a> for SqliteTransaction<'a> {
     type Err = database::Error;
 
     async fn add_or_replace_mint_quote(&mut self, quote: MintQuote) -> Result<(), Self::Err> {
+        let blinded_messages_json = match quote.blinded_messages {
+            Some(messages) => Some(serde_json::to_string(&messages).map_err(Error::from)?),
+            None => None,
+        };
+
         query(
             r#"
                 INSERT OR REPLACE INTO mint_quote (
                     id, amount, unit, request, state, expiry, request_lookup_id,
-                    pubkey, created_time, paid_time, issued_time
+                    pubkey, blinded_messages, created_time, paid_time, issued_time
                 )
                 VALUES (
                     :id, :amount, :unit, :request, :state, :expiry, :request_lookup_id,
-                    :pubkey, :created_time, :paid_time, :issued_time
+                    :pubkey, :blinded_messages, :created_time, :paid_time, :issued_time
                 )
             "#,
         )
@@ -341,6 +347,7 @@ impl<'a> MintQuotesTransaction<'a> for SqliteTransaction<'a> {
         .bind(":expiry", quote.expiry as i64)
         .bind(":request_lookup_id", quote.request_lookup_id)
         .bind(":pubkey", quote.pubkey.map(|p| p.to_string()))
+        .bind(":blinded_messages", blinded_messages_json)
         .bind(":created_time", quote.created_time as i64)
         .bind(":paid_time", quote.paid_time.map(|t| t as i64))
         .bind(":issued_time", quote.issued_time.map(|t| t as i64))
@@ -678,6 +685,7 @@ impl MintQuotesDatabase for MintSqliteDatabase {
                 expiry,
                 request_lookup_id,
                 pubkey,
+                blinded_messages,
                 created_time,
                 paid_time,
                 issued_time
@@ -707,6 +715,7 @@ impl MintQuotesDatabase for MintSqliteDatabase {
                 expiry,
                 request_lookup_id,
                 pubkey,
+                blinded_messages,
                 created_time,
                 paid_time,
                 issued_time
@@ -736,6 +745,7 @@ impl MintQuotesDatabase for MintSqliteDatabase {
                 expiry,
                 request_lookup_id,
                 pubkey,
+                blinded_messages,
                 created_time,
                 paid_time,
                 issued_time
@@ -762,6 +772,7 @@ impl MintQuotesDatabase for MintSqliteDatabase {
                        expiry,
                        request_lookup_id,
                        pubkey,
+                       blinded_messages,
                        created_time,
                        paid_time,
                        issued_time
@@ -791,6 +802,7 @@ impl MintQuotesDatabase for MintSqliteDatabase {
                        expiry,
                        request_lookup_id,
                        pubkey,
+                       blinded_messages,
                        created_time,
                        paid_time,
                        issued_time
@@ -1318,7 +1330,7 @@ fn sqlite_row_to_mint_quote(row: Vec<Column>) -> Result<MintQuote, Error> {
     unpack_into!(
         let (
             id, amount, unit, request, state, expiry, request_lookup_id,
-            pubkey, created_time, paid_time, issued_time
+            pubkey, blinded_messages, created_time, paid_time, issued_time
         ) = row
     );
 
@@ -1336,6 +1348,10 @@ fn sqlite_row_to_mint_quote(row: Vec<Column>) -> Result<MintQuote, Error> {
     let id = column_as_string!(id);
     let amount: u64 = column_as_number!(amount);
 
+    let blinded_messages = column_as_nullable_string!(&blinded_messages)
+        .map(|json_str| serde_json::from_str(&json_str))
+        .transpose()?;
+
     Ok(MintQuote {
         id: Uuid::parse_str(&id).map_err(|_| Error::InvalidUuid(id))?,
         amount: Amount::from(amount),
@@ -1345,6 +1361,7 @@ fn sqlite_row_to_mint_quote(row: Vec<Column>) -> Result<MintQuote, Error> {
         expiry: column_as_number!(expiry),
         request_lookup_id,
         pubkey,
+        blinded_messages,
         created_time: column_as_number!(created_time),
         paid_time: column_as_nullable_number!(paid_time).map(|p| p),
         issued_time: column_as_nullable_number!(issued_time).map(|p| p),

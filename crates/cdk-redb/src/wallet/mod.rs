@@ -799,4 +799,12 @@ impl WalletDatabase for WalletRedbDatabase {
     ) -> Result<Option<PreMintSecrets>, Self::Err> {
         todo!()
     }
+
+    async fn add_mint_quote_with_premint_secrets(
+        &self,
+        quote: wallet::MintQuote,
+        premint_secrets: &PreMintSecrets,
+    ) -> Result<(), Self::Err> {
+        todo!()
+    }
 }

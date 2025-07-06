@@ -466,8 +466,6 @@ impl Wallet {
             .await
             .unwrap();
 
-        self.localstore.add_mint_quote(mint_quote).await?;
-
         let active_keyset_id = self.get_active_mint_keyset_local().await?.id;
 
         // Retrieve the keyset counter, defaulting to 0 if not found
@@ -486,7 +484,7 @@ impl Wallet {
         )?;
 
         self.localstore
-            .add_premint_secrets(quote_id, &premint_secrets)
+            .add_mint_quote_with_premint_secrets(mint_quote, &premint_secrets)
             .await?;
 
         let num_secrets: u32 = premint_secrets

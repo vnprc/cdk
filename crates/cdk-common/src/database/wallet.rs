@@ -131,4 +131,11 @@ pub trait Database: Debug {
         &self,
         quote_id: &str,
     ) -> Result<Option<PreMintSecrets>, Self::Err>;
+
+    /// Add mint quote and premint secrets atomically
+    async fn add_mint_quote_with_premint_secrets(
+        &self,
+        quote: WalletMintQuote,
+        premint_secrets: &PreMintSecrets,
+    ) -> Result<(), Self::Err>;
 }

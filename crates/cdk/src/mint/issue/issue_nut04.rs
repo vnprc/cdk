@@ -100,6 +100,7 @@ impl Mint {
             create_invoice_response.expiry.unwrap_or(0),
             create_invoice_response.request_lookup_id.clone(),
             pubkey,
+            None,
         );
 
         tracing::debug!(
@@ -334,6 +335,7 @@ impl Mint {
             // TODO is there a better request lookup ID?
             header_hash.to_string(),
             pubkey,
+            Some(blinded_messages),
         );
 
         tracing::debug!(

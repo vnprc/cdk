@@ -694,7 +694,7 @@ impl<'de> Deserialize<'de> for PaymentMethod {
 
 /// PreMint
 #[cfg(feature = "wallet")]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PreMint {
     /// Blinded message
     pub blinded_message: BlindedMessage,
@@ -722,7 +722,7 @@ impl PartialOrd for PreMint {
 
 /// Premint Secrets
 #[cfg(feature = "wallet")]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PreMintSecrets {
     /// Secrets
     pub secrets: Vec<PreMint>,

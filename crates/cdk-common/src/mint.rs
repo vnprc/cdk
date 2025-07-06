@@ -2,7 +2,7 @@
 
 use bitcoin::bip32::DerivationPath;
 use cashu::util::unix_time;
-use cashu::{MeltQuoteBolt11Response, MintQuoteBolt11Response};
+use cashu::{BlindedMessage, MeltQuoteBolt11Response, MintQuoteBolt11Response};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -10,7 +10,7 @@ use crate::nuts::{MeltQuoteState, MintQuoteState};
 use crate::{Amount, CurrencyUnit, Id, KeySetInfo, PublicKey};
 
 /// Mint Quote Info
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MintQuote {
     /// Quote id
     pub id: Uuid,
@@ -28,6 +28,9 @@ pub struct MintQuote {
     pub request_lookup_id: String,
     /// Pubkey
     pub pubkey: Option<PublicKey>,
+    /// Blinded messages [NUT-XX eHash]
+    #[serde(default)]
+    pub blinded_messages: Option<Vec<BlindedMessage>>,
     /// Unix time quote was created
     #[serde(default)]
     pub created_time: u64,
@@ -46,6 +49,7 @@ impl MintQuote {
         expiry: u64,
         request_lookup_id: String,
         pubkey: Option<PublicKey>,
+        blinded_messages: Option<Vec<BlindedMessage>>,
     ) -> Self {
         let id = Uuid::new_v4();
 
@@ -58,6 +62,7 @@ impl MintQuote {
             expiry,
             request_lookup_id,
             pubkey,
+            blinded_messages,
             created_time: unix_time(),
             paid_time: None,
             issued_time: None,
