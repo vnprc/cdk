@@ -557,7 +557,7 @@ pub(crate) async fn post_restore(
 /// Get UUIDs for share hashes from Redis
 ///
 /// Fetches quote IDs for the provided share hashes from Redis cache.
-pub async fn get_quotes_shares(
+pub(crate) async fn get_quotes_shares(
     State(state): State<MintState>,
     Query(params): Query<QuotesSharesQuery>,
 ) -> Result<Json<QuotesSharesResponse>, Response> {
