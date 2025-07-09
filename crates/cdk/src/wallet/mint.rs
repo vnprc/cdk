@@ -449,9 +449,7 @@ impl Wallet {
             return Err(Error::PaidQuote);
         }
 
-        // TODO prob can't convert string to bytes like that
-        let header_hash = Hash::hash(quote_id.as_bytes());
-
+        let header_hash = quote_id.to_string();
         let mint_quote_request = MintQuoteMiningShareRequest {
             amount: Amount::from(amount),
             unit: currency_unit,

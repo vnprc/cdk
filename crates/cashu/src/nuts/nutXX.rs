@@ -36,8 +36,8 @@ pub struct MintQuoteMiningShareRequest {
     pub amount: Amount,
     /// Unit wallet would like to pay with
     pub unit: CurrencyUnit,
-    // TODO better to use a pubkey field?
-    pub header_hash: Hash,
+    /// mining share hash
+    pub header_hash: String,
     /// Memo to create the invoice with
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
