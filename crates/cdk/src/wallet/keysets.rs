@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use tracing::instrument;
 
-use crate::nuts::{Id, KeySetInfo, Keys};
+use crate::nuts::{Id, KeySet, KeySetInfo, Keys};
 use crate::{Error, Wallet};
 
 impl Wallet {
@@ -46,17 +46,18 @@ impl Wallet {
     /// Add a keyset to the local database and update keyset info
     pub async fn add_keyset(
         &self,
-        keys: Keys,
+        keyset: KeySet,
         active: bool,
         input_fee_ppk: u64,
     ) -> Result<(), Error> {
-        self.localstore.add_keys(keys.clone()).await?;
+        self.localstore.add_keys(keyset.clone()).await?;
 
         let keyset_info = KeySetInfo {
-            id: Id::from(&keys),
+            id: keyset.id,
             active,
             unit: self.unit.clone(),
             input_fee_ppk,
+            final_expiry: keyset.final_expiry,
         };
 
         self.localstore
