@@ -346,7 +346,10 @@ impl Mint {
             header_hash,
         );
 
-        self.localstore.add_mint_quote(quote.clone()).await?;
+        let mut tx = self.localstore.begin_transaction().await?;
+        tx.add_or_replace_mint_quote(quote.clone()).await?;
+        tx.commit().await?;
+
         // TODO implement block template validation and make this a separate API call
         self.pay_mint_quote(&quote).await?;
         tracing::debug!(
@@ -385,44 +388,43 @@ impl Mint {
         &self,
         mint_request: MintMiningShareRequest<Uuid>,
     ) -> Result<MintMiningShareResponse, Error> {
-        let mint_quote =
-            if let Some(mint_quote) = self.localstore.get_mint_quote(&mint_request.quote).await? {
-                mint_quote
-            } else {
-                return Err(Error::UnknownQuote);
-            };
+        let mut tx = self.localstore.begin_transaction().await?;
 
-        let state = self
-            .localstore
+        let mint_quote = tx
+            .get_mint_quote(&mint_request.quote)
+            .await?
+            .ok_or(Error::UnknownQuote)?;
+
+        let state = tx
             .update_mint_quote_state(&mint_request.quote, MintQuoteState::Pending)
             .await?;
 
-        let state = if state == MintQuoteState::Unpaid {
-            self.check_mint_quote_paid(&mint_quote.id).await?
-        } else {
-            state
-        };
+        // let state = if state == MintQuoteState::Unpaid {
+        //     self.check_mint_quote_paid(&mint_quote.id).await?
+        // } else {
+        //     state
+        // };
 
-        match state {
-            MintQuoteState::Unpaid => {
-                let _state = self
-                    .localstore
-                    .update_mint_quote_state(&mint_request.quote, MintQuoteState::Unpaid)
-                    .await?;
-                return Err(Error::UnpaidQuote);
-            }
-            MintQuoteState::Pending => {
-                return Err(Error::PendingQuote);
-            }
-            MintQuoteState::Issued => {
-                let _state = self
-                    .localstore
-                    .update_mint_quote_state(&mint_request.quote, MintQuoteState::Issued)
-                    .await?;
-                return Err(Error::IssuedQuote);
-            }
-            MintQuoteState::Paid => (),
-        }
+        // match state {
+        //     MintQuoteState::Unpaid => {
+        //         let _state = self
+        //             .localstore
+        //             .update_mint_quote_state(&mint_request.quote, MintQuoteState::Unpaid)
+        //             .await?;
+        //         return Err(Error::UnpaidQuote);
+        //     }
+        //     MintQuoteState::Pending => {
+        //         return Err(Error::PendingQuote);
+        //     }
+        //     MintQuoteState::Issued => {
+        //         let _state = self
+        //             .localstore
+        //             .update_mint_quote_state(&mint_request.quote, MintQuoteState::Issued)
+        //             .await?;
+        //         return Err(Error::IssuedQuote);
+        //     }
+        //     MintQuoteState::Paid => (),
+        // }
 
         // If the there is a public key provoided in mint quote request
         // verify the signature is provided for the mint request
@@ -430,17 +432,18 @@ impl Mint {
             mint_request.verify_signature(pubkey)?;
         }
 
-        let Verification { amount, unit } = match self.verify_outputs(&mint_request.outputs).await {
-            Ok(verification) => verification,
-            Err(err) => {
-                tracing::debug!("Could not verify mint outputs");
-                self.localstore
-                    .update_mint_quote_state(&mint_request.quote, MintQuoteState::Paid)
-                    .await?;
+        let Verification { amount, unit } =
+            match self.verify_outputs(&mut tx, &mint_request.outputs).await {
+                Ok(verification) => verification,
+                Err(err) => {
+                    tracing::debug!("Could not verify mint outputs");
+                    tx.update_mint_quote_state(&mint_request.quote, MintQuoteState::Paid)
+                        .await?;
+                    tx.commit().await?;
 
-                return Err(err);
-            }
-        };
+                    return Err(err);
+                }
+            };
 
         let total = match mint_request.total_amount() {
             Ok(val) => val,
@@ -471,21 +474,21 @@ impl Mint {
             blind_signatures.push(blind_signature);
         }
 
-        self.localstore
-            .add_blind_signatures(
-                &mint_request
-                    .outputs
-                    .iter()
-                    .map(|p| p.blinded_secret)
-                    .collect::<Vec<PublicKey>>(),
-                &blind_signatures,
-                Some(mint_request.quote),
-            )
+        tx.add_blind_signatures(
+            &mint_request
+                .outputs
+                .iter()
+                .map(|p| p.blinded_secret)
+                .collect::<Vec<PublicKey>>(),
+            &blind_signatures,
+            Some(mint_request.quote),
+        )
+        .await?;
+
+        tx.update_mint_quote_state(&mint_request.quote, MintQuoteState::Issued)
             .await?;
 
-        self.localstore
-            .update_mint_quote_state(&mint_request.quote, MintQuoteState::Issued)
-            .await?;
+        tx.commit().await?;
 
         // self.pubsub_manager
         //     .mint_mining_quote_status(mint_quote, MintQuoteState::Issued);
