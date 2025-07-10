@@ -532,6 +532,7 @@ impl<'a> MintQuotesTransaction<'a> for SqliteTransaction<'a> {
                 expiry,
                 request_lookup_id,
                 pubkey,
+                blinded_messages,
                 created_time,
                 paid_time,
                 issued_time
@@ -593,6 +594,7 @@ impl<'a> MintQuotesTransaction<'a> for SqliteTransaction<'a> {
                 expiry,
                 request_lookup_id,
                 pubkey,
+                blinded_messages,
                 created_time,
                 paid_time,
                 issued_time
@@ -654,6 +656,7 @@ impl<'a> MintQuotesTransaction<'a> for SqliteTransaction<'a> {
                 expiry,
                 request_lookup_id,
                 pubkey,
+                blinded_messages,
                 created_time,
                 paid_time,
                 issued_time
