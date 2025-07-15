@@ -554,9 +554,9 @@ pub(crate) async fn post_restore(
         (status = 500, description = "Server error", body = ErrorResponse, content_type = "application/json")
     )
 ))]
-/// Get UUIDs for share hashes from Redis
+/// Get UUIDs for share hashes from database
 ///
-/// Fetches quote IDs for the provided share hashes from Redis cache.
+/// Fetches quote IDs for the provided share hashes from the database using request_lookup_id.
 pub(crate) async fn get_quotes_shares(
     State(state): State<MintState>,
     Query(params): Query<QuotesSharesQuery>,
@@ -572,62 +572,28 @@ pub(crate) async fn get_quotes_shares(
 
     let mut quote_ids = HashMap::new();
 
-    #[cfg(feature = "redis")]
-    {
-        use redis::AsyncCommands;
-
-        if let Some(redis_client) = get_redis_client().await {
-            tracing::info!("Got Redis client");
-            let mut conn = match redis_client.get_multiplexed_tokio_connection().await {
-                Ok(conn) => conn,
-                Err(err) => {
-                    tracing::error!("Failed to get redis connection: {:?}", err);
-                    return Err(into_response(cdk::error::Error::Custom(
-                        "Failed to connect to Redis".to_string(),
-                    )));
-                }
-            };
-
-            for share_hash in share_hashes {
-                let key = format!("mint:quotes:hash:{}", share_hash);
-                tracing::info!("Looking up key: {}", key);
-                match conn.get::<String, Option<String>>(key).await {
-                    Ok(Some(uuid_str)) => {
-                        quote_ids.insert(share_hash, uuid_str);
-                    }
-                    Ok(None) => {
-                        tracing::warn!("No quote found for share hash: {}", share_hash);
-                    }
-                    Err(err) => {
-                        tracing::error!("Failed to get value from redis: {:?}", err);
-                    }
-                }
+    for share_hash in share_hashes {
+        tracing::info!("Looking up request_lookup_id: {}", share_hash);
+        match state
+            .mint
+            .localstore
+            .get_mint_quote_by_request_lookup_id(&share_hash)
+            .await
+        {
+            Ok(Some(mint_quote)) => {
+                quote_ids.insert(share_hash, mint_quote.id.to_string());
             }
-        } else {
-            tracing::warn!("No Redis client available from cache");
+            Ok(None) => {
+                tracing::warn!("No quote found for request_lookup_id: {}", share_hash);
+            }
+            Err(err) => {
+                tracing::error!("Failed to get quote from database: {:?}", err);
+            }
         }
-    }
-
-    #[cfg(not(feature = "redis"))]
-    {
-        tracing::warn!("Redis feature not enabled, cannot lookup quotes");
     }
 
     tracing::info!("Returning quote_ids: {:?}", quote_ids);
     Ok(Json(QuotesSharesResponse { quote_ids }))
-}
-
-#[cfg(feature = "redis")]
-async fn get_redis_client() -> Option<redis::Client> {
-    // For now, we'll create a new Redis client each time this function is called.
-    // This should be replaced with a better solution in the future
-
-    // Try to get Redis connection string from environment or default
-    let redis_url = std::env::var("REDIS_URL")
-        .or_else(|_| std::env::var("REDIS_CONNECTION_STRING"))
-        .unwrap_or_else(|_| "redis://localhost:6379".to_string());
-
-    redis::Client::open(redis_url).ok()
 }
 
 #[instrument(skip_all)]
