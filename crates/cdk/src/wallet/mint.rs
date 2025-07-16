@@ -352,7 +352,11 @@ impl Wallet {
             );
 
             // Update counter for keyset
-            self.localstore
+            // NOTE: This function reads counter separately (lines 288-293), generates secrets,
+            // then increments here. Potential race condition if concurrent calls could generate
+            // identical secrets with same counter values.
+            let _ = self
+                .localstore
                 .increment_keyset_counter(&active_keyset_id, proofs.len() as u32)
                 .await?;
         }
@@ -466,36 +470,33 @@ impl Wallet {
 
         let active_keyset_id = self.get_active_mint_keyset_local().await?.id;
 
-        // Retrieve the keyset counter, defaulting to 0 if not found
-        let count = self
-            .localstore
-            .get_keyset_counter(&active_keyset_id)
-            .await?
-            .unwrap_or(0);
+        // Calculate how many secrets we'll need for this amount
+        let split_target = SplitTarget::None;
+        let amounts = Amount::from(amount).split_targeted(&split_target)?;
+        let num_secrets: u32 = amounts
+            .len()
+            .try_into()
+            .map_err(|_| Error::AmountOverflow)?;
 
+        // Atomically increment counter and get the new value
+        let new_count = self
+            .localstore
+            .increment_keyset_counter(&active_keyset_id, num_secrets)
+            .await?;
+
+        // Calculate the starting counter value for this batch (before our increment)
+        let current_count = new_count - num_secrets;
         let premint_secrets = self.generate_premint_secrets(
             active_keyset_id,
             Amount::from(amount),
-            &SplitTarget::None,
+            &split_target,
             None,
-            count,
+            current_count,
         )?;
 
         self.localstore
             .add_mint_quote_with_premint_secrets(mint_quote, &premint_secrets)
             .await?;
-
-        let num_secrets: u32 = premint_secrets
-            .secrets
-            .len()
-            .try_into()
-            .map_err(|_| Error::AmountOverflow)?;
-
-        // TODO handle result
-        let result = self
-            .localstore
-            .increment_keyset_counter(&active_keyset_id, num_secrets)
-            .await;
 
         Ok(premint_secrets)
     }

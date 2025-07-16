@@ -431,7 +431,8 @@ impl Wallet {
 
                 tracing::debug!("Restored {} proofs", proofs.len());
 
-                self.localstore
+                let _ = self
+                    .localstore
                     .increment_keyset_counter(&keyset.id, proofs.len() as u32)
                     .await?;
 

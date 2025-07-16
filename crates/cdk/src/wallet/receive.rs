@@ -148,7 +148,8 @@ impl Wallet {
             &keys,
         )?;
 
-        self.localstore
+        let _ = self
+            .localstore
             .increment_keyset_counter(&active_keyset_id, recv_proofs.len() as u32)
             .await?;
 

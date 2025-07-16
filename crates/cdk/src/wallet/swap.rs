@@ -51,7 +51,8 @@ impl Wallet {
             &active_keys,
         )?;
 
-        self.localstore
+        let _ = self
+            .localstore
             .increment_keyset_counter(&active_keyset_id, pre_swap.derived_secret_count)
             .await?;
 

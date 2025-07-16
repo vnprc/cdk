@@ -222,7 +222,11 @@ impl Wallet {
                 );
 
                 // Update counter for keyset
-                self.localstore
+                // NOTE: This function reads counter separately (lines 144-149), generates secrets,
+                // then increments here. Potential race condition if concurrent calls could generate
+                // identical secrets with same counter values.
+                let _ = self
+                    .localstore
                     .increment_keyset_counter(&active_keyset_id, change_proofs.len() as u32)
                     .await?;
 

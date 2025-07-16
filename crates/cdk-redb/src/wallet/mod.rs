@@ -653,7 +653,7 @@ impl WalletDatabase for WalletRedbDatabase {
     }
 
     #[instrument(skip(self), fields(keyset_id = %keyset_id))]
-    async fn increment_keyset_counter(&self, keyset_id: &Id, count: u32) -> Result<(), Self::Err> {
+    async fn increment_keyset_counter(&self, keyset_id: &Id, count: u32) -> Result<u32, Self::Err> {
         let write_txn = self.db.begin_write().map_err(Error::from)?;
 
         let current_counter;
@@ -669,17 +669,16 @@ impl WalletDatabase for WalletRedbDatabase {
             };
         }
 
+        let new_counter = current_counter + count;
         {
             let mut table = write_txn.open_table(KEYSET_COUNTER).map_err(Error::from)?;
-            let new_counter = current_counter + count;
-
             table
                 .insert(keyset_id.to_string().as_str(), new_counter)
                 .map_err(Error::from)?;
         }
         write_txn.commit().map_err(Error::from)?;
 
-        Ok(())
+        Ok(new_counter)
     }
 
     #[instrument(skip(self), fields(keyset_id = %keyset_id))]

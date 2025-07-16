@@ -717,20 +717,24 @@ ON CONFLICT(id) DO UPDATE SET
     }
 
     #[instrument(skip(self), fields(keyset_id = %keyset_id))]
-    async fn increment_keyset_counter(&self, keyset_id: &Id, count: u32) -> Result<(), Self::Err> {
-        Statement::new(
+    async fn increment_keyset_counter(&self, keyset_id: &Id, count: u32) -> Result<u32, Self::Err> {
+        let new_counter_value = Statement::new(
             r#"
             UPDATE keyset
             SET counter=counter+:count
             WHERE id=:id
+            RETURNING counter
             "#,
         )
         .bind(":count", count)
         .bind(":id", keyset_id.to_string())
-        .execute(&self.pool.get().map_err(Error::Pool)?)
-        .map_err(Error::Sqlite)?;
+        .plunk(&self.pool.get().map_err(Error::Pool)?)
+        .map_err(Error::Sqlite)?
+        .ok_or_else(|| Error::Sqlite(rusqlite::Error::QueryReturnedNoRows))?;
 
-        Ok(())
+        let new_counter: u32 = column_as_number!(new_counter_value);
+
+        Ok(new_counter)
     }
 
     #[instrument(skip(self), fields(keyset_id = %keyset_id))]
