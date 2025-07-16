@@ -569,20 +569,6 @@ impl Wallet {
         // Remove filled quote from store
         self.localstore.remove_mint_quote(&quote.id).await?;
 
-        // copied from the mint function. idk what this is, figure it out later
-        // if spending_conditions.is_none() {
-        tracing::debug!(
-            "Incrementing keyset {} counter by {}",
-            active_keyset_id,
-            proofs.len()
-        );
-
-        // Update counter for keyset
-        self.localstore
-            .increment_keyset_counter(&active_keyset_id, proofs.len() as u32)
-            .await?;
-        // }
-
         let proof_infos = proofs
             .iter()
             .map(|proof| {

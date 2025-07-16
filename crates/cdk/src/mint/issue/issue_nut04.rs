@@ -332,7 +332,6 @@ impl Mint {
             unit.clone(),
             amount,
             quote_expiry,
-            // TODO is there a better request lookup ID?
             header_hash.to_string(),
             pubkey,
             Some(blinded_messages),
