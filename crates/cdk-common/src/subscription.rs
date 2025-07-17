@@ -93,6 +93,11 @@ impl Indexable for NotificationPayload<QuoteId> {
                     mint_quote.quote.clone(),
                 ))]
             }
+            NotificationPayload::MintQuoteMiningShareResponse(mint_quote) => {
+                vec![Index::from(Notification::MintQuoteMiningShare(
+                    mint_quote.quote,
+                ))]
+            }
         }
     }
 }

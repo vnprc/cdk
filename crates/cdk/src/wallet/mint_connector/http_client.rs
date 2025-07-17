@@ -3,7 +3,9 @@ use std::collections::HashSet;
 use std::sync::{Arc, RwLock as StdRwLock};
 
 use async_trait::async_trait;
-use cdk_common::{nut19, MeltQuoteBolt12Request, MintQuoteBolt12Request, MintQuoteBolt12Response};
+use cdk_common::{
+    MeltQuoteBolt12Request, MintQuoteBolt12Request, MintQuoteBolt12Response, QuotesSharesResponse,
+};
 #[cfg(feature = "auth")]
 use cdk_common::{Method, ProtectedEndpoint, RoutePath};
 use serde::de::DeserializeOwned;
@@ -17,6 +19,7 @@ use web_time::{Duration, Instant};
 use super::transport::Transport;
 use super::{Error, MintConnector};
 use crate::mint_url::MintUrl;
+use crate::nuts::nut19;
 #[cfg(feature = "auth")]
 use crate::nuts::nut22::MintAuthRequest;
 use crate::nuts::{
@@ -521,6 +524,51 @@ where
             &request,
         )
         .await
+    }
+
+    /// Get quote IDs for share hashes
+    #[instrument(skip(self, share_hashes), fields(mint_url = %self.mint_url))]
+    async fn get_quotes_shares(
+        &self,
+        share_hashes: Vec<String>,
+    ) -> Result<QuotesSharesResponse, Error> {
+        let share_hashes_str = share_hashes.join(",");
+        let mut url = self
+            .mint_url
+            .join_paths(&["v1", "mint", "quote-ids", "share"])?;
+
+        url.set_query(Some(&format!("share_hashes={}", share_hashes_str)));
+        self.core.http_get(url, None).await
+    }
+
+    /// Lookup mint quotes by locking pubkeys
+    #[instrument(skip(self, request), fields(mint_url = %self.mint_url, pubkey_count = ?request.pubkeys.len()))]
+    async fn post_mint_quote_lookup(
+        &self,
+        request: crate::hashpool::PostMintQuoteLookupRequest,
+    ) -> Result<crate::hashpool::PostMintQuoteLookupResponse, Error> {
+        let url = self
+            .mint_url
+            .join_paths(&["v1", "mint", "quote", "lookup"])?;
+        let auth_token = self
+            .get_auth_token(Method::Post, RoutePath::MintQuoteLookup)
+            .await?;
+        self.core.http_post(url, auth_token, &request).await
+    }
+
+    /// Mining share mint quote
+    #[instrument(skip(self, request), fields(mint_url = %self.mint_url))]
+    async fn post_mint_mining_share_quote(
+        &self,
+        request: cdk_common::nuts::nutXX::MintQuoteMiningShareRequest,
+    ) -> Result<cdk_common::nuts::nutXX::MintQuoteMiningShareResponse<String>, Error> {
+        let url = self
+            .mint_url
+            .join_paths(&["v1", "mint", "quote", "mining-share"])?;
+        let auth_token = self
+            .get_auth_token(Method::Post, RoutePath::MintQuoteMiningShare)
+            .await?;
+        self.core.http_post(url, auth_token, &request).await
     }
 }
 

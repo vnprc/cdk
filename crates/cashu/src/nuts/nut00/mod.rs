@@ -598,7 +598,8 @@ impl FromStr for CurrencyUnit {
             "USD" => Ok(Self::Usd),
             "EUR" => Ok(Self::Eur),
             "AUTH" => Ok(Self::Auth),
-            _ => Ok(Self::Custom(value.to_string())),
+            // TODO upstream this fix and move CurrencyUnit to nut01
+            _ => Ok(Self::Custom(upper_value.to_string())),
         }
     }
 }
@@ -649,6 +650,8 @@ pub enum PaymentMethod {
     Bolt11,
     /// Bolt12
     Bolt12,
+    /// Mining Share
+    MiningShare,
     /// Custom
     Custom(String),
 }
@@ -659,6 +662,7 @@ impl FromStr for PaymentMethod {
         match value.to_lowercase().as_str() {
             "bolt11" => Ok(Self::Bolt11),
             "bolt12" => Ok(Self::Bolt12),
+            "mining_share" => Ok(Self::MiningShare),
             c => Ok(Self::Custom(c.to_string())),
         }
     }
@@ -669,6 +673,7 @@ impl fmt::Display for PaymentMethod {
         match self {
             PaymentMethod::Bolt11 => write!(f, "bolt11"),
             PaymentMethod::Bolt12 => write!(f, "bolt12"),
+            PaymentMethod::MiningShare => write!(f, "mining_share"),
             PaymentMethod::Custom(p) => write!(f, "{p}"),
         }
     }
@@ -695,7 +700,7 @@ impl<'de> Deserialize<'de> for PaymentMethod {
 
 /// PreMint
 #[cfg(feature = "wallet")]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PreMint {
     /// Blinded message
     pub blinded_message: BlindedMessage,
@@ -723,7 +728,7 @@ impl PartialOrd for PreMint {
 
 /// Premint Secrets
 #[cfg(feature = "wallet")]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PreMintSecrets {
     /// Secrets
     pub secrets: Vec<PreMint>,

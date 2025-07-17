@@ -28,6 +28,7 @@ pub static MIGRATIONS: &[(&str, &str, &str)] = &[
     ("sqlite", "20250626120251_rename_blind_message_y_to_b.sql", include_str!(r#"./migrations/sqlite/20250626120251_rename_blind_message_y_to_b.sql"#)),
     ("sqlite", "20250706101057_bolt12.sql", include_str!(r#"./migrations/sqlite/20250706101057_bolt12.sql"#)),
     ("sqlite", "20250812132015_drop_melt_request.sql", include_str!(r#"./migrations/sqlite/20250812132015_drop_melt_request.sql"#)),
+    ("sqlite", "20250815069420_add_keyset_id_to_mint_quote.sql", include_str!(r#"./migrations/sqlite/20250815069420_add_keyset_id_to_mint_quote.sql"#)),
     ("sqlite", "20250819200000_remove_request_lookup_kind_constraints.sql", include_str!(r#"./migrations/sqlite/20250819200000_remove_request_lookup_kind_constraints.sql"#)),
     ("sqlite", "20250901090000_add_kv_store.sql", include_str!(r#"./migrations/sqlite/20250901090000_add_kv_store.sql"#)),
     ("sqlite", "20250903200000_add_signatory_amounts.sql", include_str!(r#"./migrations/sqlite/20250903200000_add_signatory_amounts.sql"#)),

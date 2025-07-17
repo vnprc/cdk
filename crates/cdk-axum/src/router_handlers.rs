@@ -1,8 +1,9 @@
 use anyhow::Result;
 use axum::extract::ws::WebSocketUpgrade;
-use axum::extract::{Json, Path, State};
+use axum::extract::{Json, Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use cdk::cdk_payment::PaymentIdentifier;
 use cdk::error::{ErrorCode, ErrorResponse};
 use cdk::mint::QuoteId;
 #[cfg(feature = "auth")]
@@ -13,8 +14,10 @@ use cdk::nuts::{
     MintQuoteBolt11Response, MintRequest, MintResponse, RestoreRequest, RestoreResponse,
     SwapRequest, SwapResponse,
 };
+use cdk::types::{QuotesSharesQuery, QuotesSharesResponse};
 use cdk::util::unix_time;
 use paste::paste;
+use std::collections::HashMap;
 use tracing::instrument;
 
 #[cfg(feature = "auth")]
@@ -535,6 +538,70 @@ pub(crate) async fn post_restore(
     })?;
 
     Ok(Json(restore_response))
+}
+
+// TODO remove this API
+#[cfg_attr(feature = "swagger", utoipa::path(
+    get,
+    context_path = "/v1",
+    path = "/mint/quote-ids/share",
+    params(
+        ("share_hashes" = String, Query, description = "Comma-separated list of share hashes")
+    ),
+    responses(
+        (status = 200, description = "Successful response", body = QuotesSharesResponse, content_type = "application/json"),
+        (status = 500, description = "Server error", body = ErrorResponse, content_type = "application/json")
+    )
+))]
+/// Get UUIDs for share hashes from database
+///
+/// Fetches quote IDs for the provided share hashes from the database using request_lookup_id.
+#[instrument(skip_all)]
+pub(crate) async fn get_quotes_shares(
+    State(state): State<MintState>,
+    Query(params): Query<QuotesSharesQuery>,
+) -> Result<Json<QuotesSharesResponse>, Response> {
+    let share_hashes: Vec<String> = params
+        .share_hashes
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    tracing::info!("Processing share_hashes: {:?}", share_hashes);
+
+    let mut quote_ids = HashMap::new();
+
+    // use a transaction to avoid the broken non-tx implementation
+    for share_hash in share_hashes {
+        tracing::info!("Looking up request_lookup_id: {}", share_hash);
+        match state.mint.localstore().begin_transaction().await {
+            Ok(mut tx) => {
+                match tx
+                    .get_mint_quote_by_request_lookup_id(&PaymentIdentifier::MiningShareHash(
+                        share_hash.clone(),
+                    ))
+                    .await
+                {
+                    Ok(Some(mint_quote)) => {
+                        quote_ids.insert(share_hash, mint_quote.id.to_string());
+                    }
+                    Ok(None) => {
+                        tracing::warn!("No quote found for request_lookup_id: {}", share_hash);
+                    }
+                    Err(err) => {
+                        tracing::error!("Failed to get quote from database: {:?}", err);
+                    }
+                }
+            }
+            Err(err) => {
+                tracing::error!("Failed to begin transaction: {:?}", err);
+            }
+        }
+    }
+
+    tracing::info!("Returning quote_ids: {:?}", quote_ids);
+    Ok(Json(QuotesSharesResponse { quote_ids }))
 }
 
 #[instrument(skip_all)]

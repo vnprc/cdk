@@ -1,10 +1,13 @@
-use cdk_common::mint::MintQuote;
+use cdk_common::amount::to_unit;
+use cdk_common::mint::{IncomingPayment, MintQuote};
+use cdk_common::nuts::nutXX::MintQuoteMiningShareRequest;
 use cdk_common::payment::{
     Bolt11IncomingPaymentOptions, Bolt11Settings, Bolt12IncomingPaymentOptions,
-    IncomingPaymentOptions, WaitPaymentResponse,
+    CreateIncomingPaymentResponse, IncomingPaymentOptions, PaymentIdentifier, WaitPaymentResponse,
 };
 use cdk_common::quote_id::QuoteId;
 use cdk_common::util::unix_time;
+use cdk_common::MintQuoteMiningShareResponse;
 use cdk_common::{
     database, ensure_cdk, Amount, CurrencyUnit, Error, MintQuoteBolt11Request,
     MintQuoteBolt11Response, MintQuoteBolt12Request, MintQuoteBolt12Response, MintQuoteState,
@@ -30,6 +33,8 @@ pub enum MintQuoteRequest {
     Bolt11(MintQuoteBolt11Request),
     /// Lightning Network BOLT12 offer request
     Bolt12(MintQuoteBolt12Request),
+    /// Mining share request
+    MiningShare(MintQuoteMiningShareRequest),
 }
 
 impl From<MintQuoteBolt11Request> for MintQuoteRequest {
@@ -44,6 +49,12 @@ impl From<MintQuoteBolt12Request> for MintQuoteRequest {
     }
 }
 
+impl From<MintQuoteMiningShareRequest> for MintQuoteRequest {
+    fn from(request: MintQuoteMiningShareRequest) -> Self {
+        MintQuoteRequest::MiningShare(request)
+    }
+}
+
 /// Response for a mint quote request
 ///
 /// This enum represents the different types of payment responses that can be returned
@@ -54,6 +65,8 @@ pub enum MintQuoteResponse {
     Bolt11(MintQuoteBolt11Response<QuoteId>),
     /// Lightning Network BOLT12 offer response
     Bolt12(MintQuoteBolt12Response<QuoteId>),
+    /// Mining share response
+    MiningShare(MintQuoteMiningShareResponse<QuoteId>),
 }
 
 impl TryFrom<MintQuoteResponse> for MintQuoteBolt11Response<QuoteId> {
@@ -78,6 +91,17 @@ impl TryFrom<MintQuoteResponse> for MintQuoteBolt12Response<QuoteId> {
     }
 }
 
+impl TryFrom<MintQuoteResponse> for MintQuoteMiningShareResponse<Uuid> {
+    type Error = Error;
+
+    fn try_from(response: MintQuoteResponse) -> Result<Self, Self::Error> {
+        match response {
+            MintQuoteResponse::MiningShare(mining_share_response) => Ok(mining_share_response),
+            _ => Err(Error::InvalidPaymentMethod),
+        }
+    }
+}
+
 impl TryFrom<MintQuote> for MintQuoteResponse {
     type Error = Error;
 
@@ -90,6 +114,10 @@ impl TryFrom<MintQuote> for MintQuoteResponse {
             PaymentMethod::Bolt12 => {
                 let bolt12_response = MintQuoteBolt12Response::try_from(quote)?;
                 Ok(MintQuoteResponse::Bolt12(bolt12_response))
+            }
+            PaymentMethod::MiningShare => {
+                let mining_share_response = MintQuoteMiningShareResponse::try_from(quote)?;
+                Ok(MintQuoteResponse::MiningShare(mining_share_response))
             }
             PaymentMethod::Custom(_) => Err(Error::InvalidPaymentMethod),
         }
@@ -271,6 +299,26 @@ impl Mint {
                             Error::InvalidPaymentRequest
                         })?
                 }
+                MintQuoteRequest::MiningShare(mining_request) => {
+                    unit = mining_request.unit;
+                    amount = Some(mining_request.amount);
+                    pubkey = Some(mining_request.pubkey);
+                    payment_method = PaymentMethod::MiningShare;
+
+                    self.check_mint_request_acceptable(
+                        Some(mining_request.amount),
+                        &unit,
+                        &payment_method,
+                    )
+                    .await?;
+
+                    // Mining shares don't use payment processors - they create direct payment identifiers
+                    CreateIncomingPaymentResponse {
+                        request: mining_request.header_hash.to_string(),
+                        expiry: None,
+                        request_lookup_id: PaymentIdentifier::MiningShareHash(mining_request.header_hash.to_string()),
+                    }
+                }
             };
 
             let quote = MintQuote::new(
@@ -312,6 +360,11 @@ impl Mint {
                     let res: MintQuoteBolt12Response<QuoteId> = quote.clone().try_into()?;
                     self.pubsub_manager
                         .broadcast(NotificationPayload::MintQuoteBolt12Response(res));
+                }
+                PaymentMethod::MiningShare => {
+                    let res: MintQuoteMiningShareResponse<QuoteId> = quote.clone().try_into()?;
+                    self.pubsub_manager
+                        .broadcast(NotificationPayload::MintQuoteMiningShareResponse(res));
                 }
                 PaymentMethod::Custom(_) => {}
             }
@@ -540,6 +593,105 @@ impl Mint {
         result
     }
 
+    /// Creates a mint quote for mining shares
+    ///
+    /// This function is called by the mint after the pool validates a share.
+    /// It creates a quote that is immediately marked as paid, allowing
+    /// the wallet to mint tokens using the pre-generated blinded messages.
+    ///
+    /// # Arguments
+    /// * `mint_quote_request` - The mining share request with blinded messages
+    ///
+    /// # Returns
+    /// * `MintQuote` - The created quote, ready for minting
+    /// * `Error` if validation fails or quote creation fails
+    #[instrument(skip_all)]
+    pub async fn create_mint_mining_share_quote(
+        &self,
+        mint_quote_request: MintQuoteMiningShareRequest,
+    ) -> Result<MintQuote, Error> {
+        // Validate the mining share request
+        mint_quote_request
+            .validate()
+            .map_err(|_| Error::InvalidPaymentRequest)?;
+
+        let unit = mint_quote_request.unit;
+        let amount = Some(mint_quote_request.amount);
+        let pubkey = mint_quote_request.pubkey;
+        let payment_method = PaymentMethod::MiningShare;
+        let header_hash = mint_quote_request.header_hash.to_string();
+
+        // Check mint request is acceptable for this payment method
+        self.check_mint_request_acceptable(amount, &unit, &payment_method)
+            .await?;
+
+        let mint_ttl = self.localstore.get_quote_ttl().await?.mint_ttl;
+        let expiry = unix_time() + mint_ttl;
+
+        // Create payment response for mining shares
+        let create_invoice_response = CreateIncomingPaymentResponse {
+            request_lookup_id: PaymentIdentifier::MiningShareHash(header_hash.to_string()),
+            request: header_hash.to_string(),
+            expiry: Some(expiry),
+        };
+
+        // Mining shares are immediately paid
+        let payment_amount = amount.expect("Mining share amount is always required");
+        let payment = IncomingPayment {
+            amount: payment_amount,
+            time: unix_time(),
+            payment_id: create_invoice_response.request_lookup_id.to_string(),
+        };
+
+        let quote = MintQuote::new(
+            None,
+            create_invoice_response.request.to_string(),
+            unit.clone(),
+            amount,
+            create_invoice_response.expiry.unwrap_or(0),
+            create_invoice_response.request_lookup_id.clone(),
+            pubkey,
+            payment_amount, // amount_paid
+            Amount::ZERO,   // amount_issued
+            payment_method.clone(),
+            unix_time(),
+            vec![payment],
+            vec![],                             // issuance
+            vec![],                             // blinded_messages
+            Some(mint_quote_request.keyset_id), // keyset_id for mining shares
+        );
+
+        tracing::debug!(
+            "Created mining share mint quote {} for {} {} with header hash {}",
+            quote.id,
+            payment_amount,
+            unit,
+            header_hash,
+        );
+
+        // Store the quote in database
+        let mut tx = self.localstore.begin_transaction().await?;
+        tx.add_mint_quote(quote.clone()).await?;
+
+        // Record the payment in mint_quote_payments table (mining shares are immediately paid)
+        // TODO add PENDING mining share quote support
+        tx.increment_mint_quote_amount_paid(
+            &quote.id,
+            payment_amount,
+            create_invoice_response.request_lookup_id.to_string(),
+        )
+        .await?;
+
+        tx.commit().await?;
+
+        // Broadcast notification
+        let res: MintQuoteMiningShareResponse<Uuid> = quote.clone().try_into()?;
+        self.pubsub_manager
+            .broadcast(NotificationPayload::MintQuoteMiningShareResponse(res));
+
+        Ok(quote)
+    }
+
     /// Processes a mint request to issue new tokens
     ///
     /// This function:
@@ -620,6 +772,7 @@ impl Mint {
                 }
                 mint_quote.amount_paid() - mint_quote.amount_issued()
             }
+            PaymentMethod::MiningShare => mint_quote.amount.ok_or(Error::AmountUndefined)?,
             _ => return Err(Error::UnsupportedPaymentMethod),
         };
 
@@ -683,6 +836,28 @@ impl Mint {
 
         tx.commit().await?;
 
+        // Send method-specific pubsub notifications
+        match mint_quote.payment_method {
+            PaymentMethod::Bolt11 => {
+                self.pubsub_manager
+                    .mint_quote_bolt11_status(mint_quote.clone(), MintQuoteState::Issued);
+            }
+            PaymentMethod::Bolt12 => {
+                self.pubsub_manager.mint_quote_bolt12_status(
+                    mint_quote.clone(),
+                    Amount::ZERO,
+                    mint_request.total_amount()?,
+                );
+            }
+            PaymentMethod::MiningShare => {
+                // Mining shares handled elsewhere
+            }
+            PaymentMethod::Custom(_) => {
+                // We don't send ws updates for unknown methods
+            }
+        }
+        
+        // Also send generic mint quote issue notification
         self.pubsub_manager
             .mint_quote_issue(&mint_quote, total_issued);
 

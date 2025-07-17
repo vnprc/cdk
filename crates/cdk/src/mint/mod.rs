@@ -49,6 +49,7 @@ mod verification;
 
 pub use builder::{MintBuilder, MintMeltLimits};
 pub use cdk_common::mint::{MeltQuote, MintKeySetInfo, MintQuote};
+pub use issue::MintQuoteResponse;
 pub use verification::Verification;
 
 /// Cashu Mint
@@ -971,6 +972,82 @@ impl Mint {
         global::dec_in_flight_requests("total_redeemed");
 
         Ok(total_redeemed)
+    }
+
+    /// Lookup mint quotes by NUT-20 locking pubkeys
+    ///
+    /// Retrieve mint quote information by providing the public key(s) used to lock the mint quotes.
+    ///
+    /// # Arguments
+    /// * `pubkeys` - The public keys to lookup quotes for
+    /// * `state_filter` - Explicit state filter specifying which quotes to return
+    ///
+    /// # Returns
+    /// * `Vec<MintQuoteLookupItem>` - The matching quotes
+    #[instrument(skip(self))]
+    pub async fn lookup_mint_quotes_by_pubkeys(
+        &self,
+        pubkeys: &[nuts::PublicKey],
+        state_filter: crate::hashpool::MintQuoteStateFilter,
+    ) -> Result<Vec<crate::hashpool::MintQuoteLookupItem>, Error> {
+        let quotes = self
+            .localstore
+            .get_mint_quotes_by_locking_keys(pubkeys)
+            .await?;
+
+        let mut lookup_items = Vec::new();
+        for quote in quotes {
+            if let Some(pubkey) = quote.pubkey {
+                // Apply state filtering
+                let quote_state = quote.state();
+                let should_include = match state_filter {
+                    crate::hashpool::MintQuoteStateFilter::All => true,
+                    crate::hashpool::MintQuoteStateFilter::OnlyPaid => {
+                        quote_state == nuts::MintQuoteState::Paid
+                    }
+                    crate::hashpool::MintQuoteStateFilter::OnlyUnpaid => {
+                        quote_state == nuts::MintQuoteState::Unpaid
+                    }
+                    crate::hashpool::MintQuoteStateFilter::OnlyIssued => {
+                        quote_state == nuts::MintQuoteState::Issued
+                    }
+                    crate::hashpool::MintQuoteStateFilter::Specific(filter_state) => {
+                        quote_state == filter_state
+                    }
+                };
+
+                if !should_include {
+                    continue;
+                }
+
+                // For mining shares, get keyset_id from the first blinded message
+                // For other payment methods, use a default or active keyset
+                let keyset_id = if quote.payment_method == nuts::PaymentMethod::MiningShare {
+                    // For mining shares, get keyset_id from the quote itself
+                    quote.keyset_id.unwrap_or_else(|| {
+                        // Fallback: get from first blinded message if quote doesn't have keyset_id
+                        quote
+                            .blinded_messages
+                            .first()
+                            .map(|bm| bm.keyset_id)
+                            .unwrap_or_else(|| nuts::Id::from_bytes(&[0; 8]).unwrap())
+                        // fallback id
+                    })
+                } else {
+                    nuts::Id::from_bytes(&[0; 8]).unwrap() // For non-mining-share quotes, keyset is determined at mint time
+                };
+
+                lookup_items.push(crate::hashpool::MintQuoteLookupItem {
+                    pubkey,
+                    quote: quote.id.to_string(),
+                    method: quote.payment_method.clone(),
+                    amount: quote.amount.unwrap_or_default(),
+                    keyset_id,
+                });
+            }
+        }
+
+        Ok(lookup_items)
     }
 }
 

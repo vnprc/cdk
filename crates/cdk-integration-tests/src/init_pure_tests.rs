@@ -20,6 +20,7 @@ use cdk::nuts::{
     MintQuoteBolt11Response, MintRequest, MintResponse, PaymentMethod, RestoreRequest,
     RestoreResponse, SwapRequest, SwapResponse,
 };
+use cdk::types::QuotesSharesResponse;
 use cdk::types::{FeeReserve, QuoteTTL};
 use cdk::util::unix_time;
 use cdk::wallet::{AuthWallet, MintConnector, Wallet, WalletBuilder};
@@ -200,6 +201,36 @@ impl MintConnector for DirectMintConnection {
     ) -> Result<MeltQuoteBolt11Response<String>, Error> {
         // Implementation to be added later
         Err(Error::UnsupportedPaymentMethod)
+    }
+
+    async fn get_quotes_shares(
+        &self,
+        _share_hashes: Vec<String>,
+    ) -> Result<QuotesSharesResponse, Error> {
+        // Stub implementation - will be deleted once locking key lookup is working
+        Ok(QuotesSharesResponse {
+            quote_ids: HashMap::new(),
+        })
+    }
+
+    async fn post_mint_quote_lookup(
+        &self,
+        request: cdk::hashpool::PostMintQuoteLookupRequest,
+    ) -> Result<cdk::hashpool::PostMintQuoteLookupResponse, Error> {
+        let quotes = self
+            .mint
+            .lookup_mint_quotes_by_pubkeys(&request.pubkeys, request.state_filter)
+            .await?;
+        Ok(cdk::hashpool::PostMintQuoteLookupResponse { quotes })
+    }
+
+    async fn post_mint_mining_share_quote(
+        &self,
+        request: cashu::MintQuoteMiningShareRequest,
+    ) -> Result<cashu::MintQuoteMiningShareResponse<String>, Error> {
+        let quote = self.mint.create_mint_mining_share_quote(request).await?;
+        let response: cashu::MintQuoteMiningShareResponse<String> = quote.try_into()?;
+        Ok(response)
     }
 }
 

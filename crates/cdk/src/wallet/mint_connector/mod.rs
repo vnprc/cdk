@@ -3,7 +3,9 @@
 use std::fmt::Debug;
 
 use async_trait::async_trait;
-use cdk_common::{MeltQuoteBolt12Request, MintQuoteBolt12Request, MintQuoteBolt12Response};
+use cdk_common::{
+    MeltQuoteBolt12Request, MintQuoteBolt12Request, MintQuoteBolt12Response, QuotesSharesResponse,
+};
 
 use super::Error;
 use crate::nuts::{
@@ -73,6 +75,24 @@ pub trait MintConnector: Debug {
     ) -> Result<CheckStateResponse, Error>;
     /// Restore request [NUT-13]
     async fn post_restore(&self, request: RestoreRequest) -> Result<RestoreResponse, Error>;
+
+    /// Get quote IDs for share hashes
+    async fn get_quotes_shares(
+        &self,
+        share_hashes: Vec<String>,
+    ) -> Result<QuotesSharesResponse, Error>;
+
+    /// Lookup mint quotes by locking pubkeys
+    async fn post_mint_quote_lookup(
+        &self,
+        request: crate::hashpool::PostMintQuoteLookupRequest,
+    ) -> Result<crate::hashpool::PostMintQuoteLookupResponse, Error>;
+
+    /// Mining share mint quote
+    async fn post_mint_mining_share_quote(
+        &self,
+        request: cdk_common::nuts::nutXX::MintQuoteMiningShareRequest,
+    ) -> Result<cdk_common::nuts::nutXX::MintQuoteMiningShareResponse<String>, Error>;
 
     /// Get the auth wallet for the client
     #[cfg(feature = "auth")]

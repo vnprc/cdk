@@ -23,6 +23,12 @@ impl Mint {
             return Ok(());
         }
 
+        // TODO refactor code structure to remove this function from mining share code path
+        // Mining shares are verified during quote creation and don't need Lightning verification
+        if quote.payment_method == PaymentMethod::MiningShare {
+            return Ok(());
+        }
+
         let ln = match self.payment_processors.get(&PaymentProcessorKey::new(
             quote.unit.clone(),
             quote.payment_method.clone(),
@@ -65,6 +71,28 @@ impl Mint {
                     .increment_mint_quote_amount_paid(&quote.id, amount_paid, payment.payment_id)
                     .await?;
 
+                // Send method-specific pubsub notifications
+                match quote.payment_method {
+                    PaymentMethod::Bolt11 => {
+                        self.pubsub_manager
+                            .mint_quote_bolt11_status(quote.clone(), MintQuoteState::Paid);
+                    }
+                    PaymentMethod::Bolt12 => {
+                        self.pubsub_manager.mint_quote_bolt12_status(
+                            quote.clone(),
+                            amount_paid,
+                            Amount::ZERO,
+                        );
+                    }
+                    PaymentMethod::MiningShare => {
+                        // Mining shares handled elsewhere
+                    }
+                    PaymentMethod::Custom(_) => {
+                        // We don't send ws updates for unknown methods
+                    }
+                }
+
+                // Also send generic mint quote payment notification
                 self.pubsub_manager.mint_quote_payment(quote, total_paid);
             }
         }

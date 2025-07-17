@@ -475,9 +475,9 @@ ON CONFLICT(mint_url) DO UPDATE SET
         query(
             r#"
 INSERT INTO mint_quote
-(id, mint_url, amount, unit, request, state, expiry, secret_key, payment_method, amount_issued, amount_paid)
+(id, mint_url, amount, unit, request, state, expiry, secret_key, payment_method, amount_issued, amount_paid, keyset_id)
 VALUES
-(:id, :mint_url, :amount, :unit, :request, :state, :expiry, :secret_key, :payment_method, :amount_issued, :amount_paid)
+(:id, :mint_url, :amount, :unit, :request, :state, :expiry, :secret_key, :payment_method, :amount_issued, :amount_paid, :keyset_id)
 ON CONFLICT(id) DO UPDATE SET
     mint_url = excluded.mint_url,
     amount = excluded.amount,
@@ -488,7 +488,8 @@ ON CONFLICT(id) DO UPDATE SET
     secret_key = excluded.secret_key,
     payment_method = excluded.payment_method,
     amount_issued = excluded.amount_issued,
-    amount_paid = excluded.amount_paid
+    amount_paid = excluded.amount_paid,
+    keyset_id = excluded.keyset_id
 ;
         "#,
         )?
@@ -503,6 +504,7 @@ ON CONFLICT(id) DO UPDATE SET
         .bind("payment_method", quote.payment_method.to_string())
         .bind("amount_issued", quote.amount_issued.to_i64())
         .bind("amount_paid", quote.amount_paid.to_i64())
+        .bind("keyset_id", quote.keyset_id.map(|k| k.to_string()))
         .execute(&*conn).await?;
 
         Ok(())
@@ -524,7 +526,8 @@ ON CONFLICT(id) DO UPDATE SET
                 secret_key,
                 payment_method,
                 amount_issued,
-                amount_paid
+                amount_paid,
+                keyset_id
             FROM
                 mint_quote
             WHERE
@@ -657,12 +660,14 @@ ON CONFLICT(id) DO UPDATE SET
         // Recompute ID for verification
         keyset.verify_id()?;
 
+        // TODO upstream "on conflict do nothing" change
         query(
             r#"
             INSERT INTO key
             (id, keys, keyset_u32)
             VALUES
             (:id, :keys, :keyset_u32)
+            ON CONFLICT(id) DO NOTHING
         "#,
         )?
         .bind("id", keyset.id.to_string())
@@ -1097,7 +1102,8 @@ fn sql_row_to_mint_quote(row: Vec<Column>) -> Result<MintQuote, Error> {
             secret_key,
             row_method,
             row_amount_minted,
-            row_amount_paid
+            row_amount_paid,
+            keyset_id
         ) = row
     );
 
@@ -1107,6 +1113,9 @@ fn sql_row_to_mint_quote(row: Vec<Column>) -> Result<MintQuote, Error> {
     let amount_minted: u64 = column_as_number!(row_amount_minted);
     let payment_method =
         PaymentMethod::from_str(&column_as_string!(row_method)).map_err(Error::from)?;
+    let keyset_id = column_as_nullable_string!(keyset_id)
+        .map(|k| Id::from_str(&k))
+        .transpose()?;
 
     Ok(MintQuote {
         id: column_as_string!(id),
@@ -1122,6 +1131,7 @@ fn sql_row_to_mint_quote(row: Vec<Column>) -> Result<MintQuote, Error> {
         payment_method,
         amount_issued: amount_minted.into(),
         amount_paid: amount_paid.into(),
+        keyset_id,
     })
 }
 

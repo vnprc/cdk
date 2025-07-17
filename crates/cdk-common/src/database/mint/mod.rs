@@ -205,6 +205,11 @@ pub trait QuotesDatabase {
     ) -> Result<Option<MintMintQuote>, Self::Err>;
     /// Get Mint Quotes
     async fn get_mint_quotes(&self) -> Result<Vec<MintMintQuote>, Self::Err>;
+    /// Get Mint Quotes by locking keys
+    async fn get_mint_quotes_by_locking_keys(
+        &self,
+        pubkeys: &[PublicKey],
+    ) -> Result<Vec<MintMintQuote>, Self::Err>;
     /// Get [`mint::MeltQuote`]
     async fn get_melt_quote(
         &self,

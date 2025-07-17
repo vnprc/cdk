@@ -4,8 +4,8 @@ use bitcoin::bip32::DerivationPath;
 use cashu::quote_id::QuoteId;
 use cashu::util::unix_time;
 use cashu::{
-    Bolt11Invoice, MeltOptions, MeltQuoteBolt11Response, MintQuoteBolt11Response,
-    MintQuoteBolt12Response, PaymentMethod,
+    BlindedMessage, Bolt11Invoice, MeltOptions, MeltQuoteBolt11Response, MintQuoteBolt11Response,
+    MintQuoteBolt12Response, MintQuoteMiningShareResponse, PaymentMethod,
 };
 use lightning::offers::offer::Offer;
 use serde::{Deserialize, Serialize};
@@ -51,6 +51,13 @@ pub struct MintQuote {
     /// Payment of payment(s) that filled quote
     #[serde(default)]
     pub issuance: Vec<Issuance>,
+    // TODO remove
+    /// Blinded messages for mining shares (empty for other payment methods)
+    #[serde(default)]
+    pub blinded_messages: Vec<BlindedMessage>,
+    /// Keyset ID for mining share quotes (None for other payment methods where keyset is determined at mint time)
+    #[serde(default)]
+    pub keyset_id: Option<Id>,
 }
 
 impl MintQuote {
@@ -70,6 +77,9 @@ impl MintQuote {
         created_time: u64,
         payments: Vec<IncomingPayment>,
         issuance: Vec<Issuance>,
+        // TODO remove
+        blinded_messages: Vec<BlindedMessage>,
+        keyset_id: Option<Id>,
     ) -> Self {
         let id = id.unwrap_or_else(QuoteId::new_uuid);
 
@@ -87,6 +97,9 @@ impl MintQuote {
             payment_method,
             payments,
             issuance,
+            // TODO remove
+            blinded_messages,
+            keyset_id,
         }
     }
 
@@ -383,6 +396,31 @@ impl TryFrom<MintQuote> for MintQuoteBolt12Response<String> {
 
     fn try_from(quote: MintQuote) -> Result<Self, Self::Error> {
         let quote: MintQuoteBolt12Response<QuoteId> = quote.try_into()?;
+
+        Ok(quote.into())
+    }
+}
+
+impl TryFrom<crate::mint::MintQuote> for MintQuoteMiningShareResponse<QuoteId> {
+    type Error = crate::Error;
+
+    fn try_from(mint_quote: crate::mint::MintQuote) -> Result<Self, Self::Error> {
+        Ok(MintQuoteMiningShareResponse {
+            quote: mint_quote.id,
+            request: mint_quote.request,
+            amount: mint_quote.amount,
+            unit: Some(mint_quote.unit),
+            expiry: Some(mint_quote.expiry),
+            pubkey: mint_quote.pubkey,
+        })
+    }
+}
+
+impl TryFrom<MintQuote> for MintQuoteMiningShareResponse<String> {
+    type Error = crate::Error;
+
+    fn try_from(quote: MintQuote) -> Result<Self, Self::Error> {
+        let quote: MintQuoteMiningShareResponse<QuoteId> = quote.try_into()?;
 
         Ok(quote.into())
     }
