@@ -21,6 +21,7 @@ use router_handlers::*;
 mod auth;
 mod bolt12_router;
 pub mod cache;
+mod hashpool_router;
 mod router_handlers;
 mod ws;
 
@@ -59,6 +60,7 @@ use crate::bolt12_router::{
     cache_post_melt_bolt12, cache_post_mint_bolt12, get_check_mint_bolt12_quote,
     post_melt_bolt12_quote, post_mint_bolt12_quote,
 };
+use crate::hashpool_router::create_hashpool_router;
 
 /// CDK Mint State
 #[derive(Clone)]
@@ -304,7 +306,9 @@ pub async fn create_mint_router_with_custom_cache(
         .route("/melt/bolt11", post(cache_post_melt_bolt11))
         .route("/checkstate", post(post_check))
         .route("/info", get(get_mint_info))
-        .route("/restore", post(post_restore));
+        .route("/restore", post(post_restore))
+        // TODO remove
+        .route("/mint/quote-ids/share", get(get_quotes_shares));
 
     let mint_router = Router::new().nest("/v1", v1_router);
 
@@ -321,6 +325,10 @@ pub async fn create_mint_router_with_custom_cache(
     } else {
         mint_router
     };
+
+    // Add hashpool router for quote lookup functionality
+    let hashpool_router = create_hashpool_router(state.clone());
+    let mint_router = mint_router.nest("/v1", hashpool_router);
 
     let mint_router = mint_router
         .layer(from_fn(cors_middleware))

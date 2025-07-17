@@ -684,12 +684,15 @@ impl CdkMint for MintRPCServer {
                     mint_quote.expiry,                    // expiry
                     mint_quote.request_lookup_id.clone(), // request_lookup_id
                     mint_quote.pubkey,                    // pubkey
-                    mint_quote.amount_issued(),           // amount_issued
                     mint_quote.amount_paid(),             // amount_paid
-                    mint_quote.payment_method.clone(),    // method
-                    0,                                    // created_at
-                    vec![],                               // blinded_messages
-                    vec![],                               // payment_ids
+                    mint_quote.amount_issued(),           // amount_issued
+                    mint_quote.payment_method.clone(),    // payment_method
+                    0,                                    // created_time
+                    vec![],                               // payments
+                    vec![],                               // issuance
+                    // TODO Remove?
+                    vec![], // blinded_messages
+                    None,   // keyset_id (None for non-mining-share quotes)
                 );
 
                 let mint_store = self.mint.localstore();

@@ -25,6 +25,8 @@ pub mod wallet;
 #[cfg(feature = "bip353")]
 mod bip353;
 
+pub mod hashpool;
+
 #[cfg(all(any(feature = "wallet", feature = "mint"), feature = "auth"))]
 mod oidc_client;
 

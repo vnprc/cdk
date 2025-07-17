@@ -1,6 +1,7 @@
 //! Types
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use crate::error::Error;
 use crate::mint_url::MintUrl;
@@ -350,4 +351,18 @@ pub struct FeeReserve {
     pub min_fee_reserve: Amount,
     /// Percentage expected fee
     pub percent_fee_reserve: f32,
+}
+
+/// Query parameters for getting quote IDs from share hashes
+#[derive(Debug, Deserialize)]
+pub struct QuotesSharesQuery {
+    /// Comma-separated list of share hashes
+    pub share_hashes: String,
+}
+
+/// Response containing quote ID mappings for share hashes
+#[derive(Debug, Serialize, Deserialize)]
+pub struct QuotesSharesResponse {
+    /// Share hash -> quote ID mapping
+    pub quote_ids: HashMap<String, String>,
 }

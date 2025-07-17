@@ -23,6 +23,12 @@ impl Mint {
             return Ok(());
         }
 
+        // TODO refactor code structure to remove this function from mining share code path
+        // Mining shares are verified during quote creation and don't need Lightning verification
+        if quote.payment_method == PaymentMethod::MiningShare {
+            return Ok(());
+        }
+
         let ln = match self.payment_processors.get(&PaymentProcessorKey::new(
             quote.unit.clone(),
             quote.payment_method.clone(),
@@ -78,6 +84,9 @@ impl Mint {
                     }
                     PaymentMethod::Custom(_) => {
                         // We don't send ws updates for unknown methods
+                    }
+                    PaymentMethod::MiningShare => {
+                        // Mining shares handled elsewhere
                     }
                 }
             }
