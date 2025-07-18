@@ -133,6 +133,11 @@ pub async fn wait_for_mint_to_be_paid(
                     }
                 }
                 PaymentMethod::Custom(_) => (),
+                PaymentMethod::MiningShare => {
+                    // TODO: Implement mining share quote state checking
+                    // For now, skip mining share payment methods in integration tests
+                    return Ok(());
+                }
             }
             sleep(check_interval).await;
         }

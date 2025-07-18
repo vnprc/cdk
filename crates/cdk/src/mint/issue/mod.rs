@@ -4,6 +4,7 @@ use cdk_common::payment::{
     IncomingPaymentOptions, WaitPaymentResponse,
 };
 use cdk_common::util::unix_time;
+use cdk_common::MintQuoteMiningShareResponse;
 use cdk_common::{
     database, ensure_cdk, Amount, CurrencyUnit, Error, MintQuoteBolt11Request,
     MintQuoteBolt11Response, MintQuoteBolt12Request, MintQuoteBolt12Response, MintQuoteState,
@@ -52,6 +53,8 @@ pub enum MintQuoteResponse {
     Bolt11(MintQuoteBolt11Response<Uuid>),
     /// Lightning Network BOLT12 offer response
     Bolt12(MintQuoteBolt12Response<Uuid>),
+    /// Mining share response
+    MiningShare(MintQuoteMiningShareResponse<Uuid>),
 }
 
 impl TryFrom<MintQuoteResponse> for MintQuoteBolt11Response<Uuid> {
@@ -76,6 +79,17 @@ impl TryFrom<MintQuoteResponse> for MintQuoteBolt12Response<Uuid> {
     }
 }
 
+impl TryFrom<MintQuoteResponse> for MintQuoteMiningShareResponse<Uuid> {
+    type Error = Error;
+
+    fn try_from(response: MintQuoteResponse) -> Result<Self, Self::Error> {
+        match response {
+            MintQuoteResponse::MiningShare(mining_share_response) => Ok(mining_share_response),
+            _ => Err(Error::InvalidPaymentMethod),
+        }
+    }
+}
+
 impl TryFrom<MintQuote> for MintQuoteResponse {
     type Error = Error;
 
@@ -88,6 +102,10 @@ impl TryFrom<MintQuote> for MintQuoteResponse {
             PaymentMethod::Bolt12 => {
                 let bolt12_response = MintQuoteBolt12Response::try_from(quote)?;
                 Ok(MintQuoteResponse::Bolt12(bolt12_response))
+            }
+            PaymentMethod::MiningShare => {
+                let mining_share_response = MintQuoteMiningShareResponse::try_from(quote)?;
+                Ok(MintQuoteResponse::MiningShare(mining_share_response))
             }
             PaymentMethod::Custom(_) => Err(Error::InvalidPaymentMethod),
         }
@@ -310,6 +328,11 @@ impl Mint {
                 let res: MintQuoteBolt12Response<Uuid> = quote.clone().try_into()?;
                 self.pubsub_manager
                     .broadcast(NotificationPayload::MintQuoteBolt12Response(res));
+            }
+            PaymentMethod::MiningShare => {
+                let res: MintQuoteMiningShareResponse<Uuid> = quote.clone().try_into()?;
+                self.pubsub_manager
+                    .broadcast(NotificationPayload::MintQuoteMiningShareResponse(res));
             }
             PaymentMethod::Custom(_) => {}
         }

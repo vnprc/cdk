@@ -6,6 +6,7 @@ use uuid::Uuid;
 
 #[cfg(feature = "mint")]
 use super::PublicKey;
+use crate::nuts::nutXX::MintQuoteMiningShareResponse;
 use crate::nuts::{
     CurrencyUnit, MeltQuoteBolt11Response, MintQuoteBolt11Response, PaymentMethod, ProofState,
 };
@@ -115,6 +116,12 @@ impl<T> From<MintQuoteBolt12Response<T>> for NotificationPayload<T> {
     }
 }
 
+impl<T> From<MintQuoteMiningShareResponse<T>> for NotificationPayload<T> {
+    fn from(mint_quote: MintQuoteMiningShareResponse<T>) -> NotificationPayload<T> {
+        NotificationPayload::MintQuoteMiningShareResponse(mint_quote)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(bound = "T: Serialize + DeserializeOwned")]
 #[serde(untagged)]
@@ -128,6 +135,8 @@ pub enum NotificationPayload<T> {
     MintQuoteBolt11Response(MintQuoteBolt11Response<T>),
     /// Mint Quote Bolt12 Response
     MintQuoteBolt12Response(MintQuoteBolt12Response<T>),
+    /// Mint Quote Mining Share Response
+    MintQuoteMiningShareResponse(MintQuoteMiningShareResponse<T>),
 }
 
 impl<T> From<ProofState> for NotificationPayload<T> {
@@ -162,6 +171,8 @@ pub enum Notification {
     MintQuoteBolt12(Uuid),
     /// MintQuote id is an Uuid
     MeltQuoteBolt12(Uuid),
+    /// MintQuote id is a Uuid
+    MintQuoteMiningShare(Uuid),
 }
 
 /// Kind
