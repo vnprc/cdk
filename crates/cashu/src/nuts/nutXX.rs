@@ -5,7 +5,7 @@
 use std::fmt;
 use std::str::FromStr;
 
-use bitcoin::hashes::sha256::Hash;
+use bitcoin::hashes::{sha256, Hash};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -27,6 +27,18 @@ pub enum Error {
     /// Invalid Request
     #[error("Invalid Request")]
     InvalidRequest,
+    /// Invalid header hash
+    #[error("Invalid header hash")]
+    InvalidHeaderHash,
+    /// Quote expired
+    #[error("Quote expired")]
+    QuoteExpired,
+    /// Invalid amount
+    #[error("Invalid amount: must be positive and not exceed 256")]
+    InvalidAmount,
+    /// No outputs provided
+    #[error("No outputs provided in request")]
+    NoOutputs,
 }
 
 /// Mining share mint quote request
@@ -38,7 +50,7 @@ pub struct MintQuoteMiningShareRequest {
     /// Currency unit
     pub unit: CurrencyUnit,
     /// Mining share hash (block header hash)
-    pub header_hash: Hash,
+    pub header_hash: sha256::Hash,
     /// Optional description
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -46,6 +58,28 @@ pub struct MintQuoteMiningShareRequest {
     /// Optional pubkey for NUT-20 signature validation
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pubkey: Option<PublicKey>,
+}
+
+impl MintQuoteMiningShareRequest {
+    /// Validate the mining share request
+    pub fn validate(&self) -> Result<(), Error> {
+        // Valid amounts are between 1 and 256 inclusive
+        if self.amount == Amount::ZERO || self.amount > Amount::from(256) {
+            return Err(Error::InvalidAmount);
+        }
+
+        // Header hash validation - ensure it's not all zeros
+        if self.header_hash.to_byte_array().iter().all(|&b| b == 0) {
+            return Err(Error::InvalidHeaderHash);
+        }
+
+        Ok(())
+    }
+
+    /// Get header hash as hex string
+    pub fn header_hash_hex(&self) -> String {
+        self.header_hash.to_string()
+    }
 }
 
 /// Mining share mint quote response
@@ -80,6 +114,34 @@ impl<Q: ToString> MintQuoteMiningShareResponse<Q> {
             amount: self.amount,
             unit: self.unit.clone(),
         }
+    }
+
+    /// Check if quote has expired
+    pub fn is_expired(&self) -> bool {
+        if let Some(expiry) = self.expiry {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            now > expiry
+        } else {
+            false
+        }
+    }
+
+    /// Validate the response
+    pub fn validate(&self) -> Result<(), Error> {
+        if self.is_expired() {
+            return Err(Error::QuoteExpired);
+        }
+
+        if let Some(amount) = self.amount {
+            if amount == Amount::ZERO {
+                return Err(Error::InvalidAmount);
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -121,6 +183,25 @@ impl<Q> MintMiningShareRequest<Q> {
                 .map(|BlindedMessage { amount, .. }| *amount),
         )
         .map_err(|_| Error::AmountOverflow)
+    }
+
+    /// Validate the mint request
+    pub fn validate(&self) -> Result<(), Error> {
+        if self.outputs.is_empty() {
+            return Err(Error::NoOutputs);
+        }
+
+        // Validate each output has positive amount
+        for output in &self.outputs {
+            if output.amount == Amount::ZERO {
+                return Err(Error::InvalidAmount);
+            }
+        }
+
+        // Ensure total doesn't overflow
+        self.amount_outputs()?;
+
+        Ok(())
     }
 }
 
