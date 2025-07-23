@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 
 use async_trait::async_trait;
-use cashu::KeySet;
+use cashu::{KeySet, PreMintSecrets};
 
 use super::Error;
 use crate::common::ProofInfo;
@@ -118,4 +118,18 @@ pub trait Database: Debug {
     ) -> Result<Vec<Transaction>, Self::Err>;
     /// Remove transaction from storage
     async fn remove_transaction(&self, transaction_id: TransactionId) -> Result<(), Self::Err>;
+
+    /// Add premint secrets to storage
+    async fn add_premint_secrets(
+        &self,
+        quote_id: &str,
+        secrets: PreMintSecrets,
+    ) -> Result<(), Self::Err>;
+    /// Get premint secrets from storage
+    async fn get_premint_secrets(
+        &self,
+        quote_id: &str,
+    ) -> Result<Option<PreMintSecrets>, Self::Err>;
+    /// Remove premint secrets from storage
+    async fn remove_premint_secrets(&self, quote_id: &str) -> Result<(), Self::Err>;
 }

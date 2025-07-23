@@ -188,6 +188,15 @@ pub enum Error {
     /// Oidc config not set
     #[error("Oidc client not set")]
     OidcNotSet,
+    /// Premint secrets not found
+    #[error("Premint secrets not found")]
+    PreMintSecretsNotFound,
+    /// Mismatched signature count
+    #[error("Number of signatures does not match number of secrets")]
+    MismatchedSignatureCount,
+    /// Mining share validation error
+    #[error("Mining share validation failed: {0}")]
+    MiningShareValidation(String),
 
     // Wallet Errors
     /// P2PK spending conditions not met
