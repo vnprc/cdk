@@ -1,8 +1,11 @@
+use cdk_common::mint::IncomingPayment;
 use cdk_common::mint::MintQuote;
+use cdk_common::nuts::nutXX::MintQuoteMiningShareRequest;
 use cdk_common::payment::{
     Bolt11IncomingPaymentOptions, Bolt11Settings, Bolt12IncomingPaymentOptions,
     IncomingPaymentOptions, WaitPaymentResponse,
 };
+use cdk_common::payment::{CreateIncomingPaymentResponse, PaymentIdentifier};
 use cdk_common::util::unix_time;
 use cdk_common::MintQuoteMiningShareResponse;
 use cdk_common::{
@@ -29,6 +32,8 @@ pub enum MintQuoteRequest {
     Bolt11(MintQuoteBolt11Request),
     /// Lightning Network BOLT12 offer request
     Bolt12(MintQuoteBolt12Request),
+    /// Mining share request
+    MiningShare(MintQuoteMiningShareRequest),
 }
 
 impl From<MintQuoteBolt11Request> for MintQuoteRequest {
@@ -40,6 +45,12 @@ impl From<MintQuoteBolt11Request> for MintQuoteRequest {
 impl From<MintQuoteBolt12Request> for MintQuoteRequest {
     fn from(request: MintQuoteBolt12Request) -> Self {
         MintQuoteRequest::Bolt12(request)
+    }
+}
+
+impl From<MintQuoteMiningShareRequest> for MintQuoteRequest {
+    fn from(request: MintQuoteMiningShareRequest) -> Self {
+        MintQuoteRequest::MiningShare(request)
     }
 }
 
@@ -287,6 +298,44 @@ impl Mint {
                         Error::InvalidPaymentRequest
                     })?
             }
+            MintQuoteRequest::MiningShare(mining_request) => {
+                // Validate the mining share request first
+                mining_request
+                    .validate()
+                    .map_err(|_| Error::InvalidPaymentRequest)?;
+
+                unit = mining_request.unit;
+                amount = Some(mining_request.amount);
+                pubkey = mining_request.pubkey;
+                payment_method = PaymentMethod::MiningShare;
+                let header_hash = mining_request.header_hash.to_string();
+
+                self.check_mint_request_acceptable(amount, &unit, &payment_method)
+                    .await?;
+
+                let mint_ttl = self.localstore.get_quote_ttl().await?.mint_ttl;
+                let expiry = unix_time() + mint_ttl;
+
+                // For mining shares, we create a simple response with header hash as request
+                CreateIncomingPaymentResponse {
+                    request_lookup_id: PaymentIdentifier::MiningShareHash(header_hash.to_string()),
+                    request: header_hash.to_string(),
+                    expiry: Some(expiry),
+                }
+            }
+        };
+
+        // For mining shares, create quote as immediately paid
+        let (amount_paid, payments) = if payment_method == PaymentMethod::MiningShare {
+            let payment_amount = amount.expect("Mining share amount is always required");
+            let payment = IncomingPayment {
+                amount: payment_amount,
+                time: unix_time(),
+                payment_id: create_invoice_response.request_lookup_id.to_string(),
+            };
+            (payment_amount, vec![payment])
+        } else {
+            (Amount::ZERO, vec![])
         };
 
         let quote = MintQuote::new(
@@ -297,11 +346,11 @@ impl Mint {
             create_invoice_response.expiry.unwrap_or(0),
             create_invoice_response.request_lookup_id.clone(),
             pubkey,
-            Amount::ZERO,
+            amount_paid,
             Amount::ZERO,
             payment_method.clone(),
             unix_time(),
-            vec![],
+            payments,
             vec![],
         );
 

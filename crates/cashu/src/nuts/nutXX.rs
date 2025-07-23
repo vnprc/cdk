@@ -13,7 +13,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use super::{BlindSignature, CurrencyUnit, PublicKey};
-use crate::{Amount, BlindedMessage};
+use crate::Amount;
 
 /// Mining share NUT error
 #[derive(Debug, Error)]
@@ -74,11 +74,6 @@ impl MintQuoteMiningShareRequest {
         }
 
         Ok(())
-    }
-
-    /// Get header hash as hex string
-    pub fn header_hash_hex(&self) -> String {
-        self.header_hash.to_string()
     }
 }
 
@@ -156,52 +151,6 @@ impl From<MintQuoteMiningShareResponse<Uuid>> for MintQuoteMiningShareResponse<S
             amount: value.amount,
             unit: value.unit,
         }
-    }
-}
-
-/// Mining share mint request
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "swagger", derive(utoipa::ToSchema))]
-#[serde(bound = "Q: Serialize + DeserializeOwned")]
-pub struct MintMiningShareRequest<Q> {
-    /// Quote ID
-    pub quote: Q,
-    /// Blinded outputs to sign
-    pub outputs: Vec<BlindedMessage>,
-    // TODO make mandatory
-    /// Optional signature for NUT-20
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub signature: Option<PublicKey>,
-}
-
-impl<Q> MintMiningShareRequest<Q> {
-    /// Calculate total amount of outputs
-    pub fn amount_outputs(&self) -> Result<Amount, Error> {
-        Amount::try_sum(
-            self.outputs
-                .iter()
-                .map(|BlindedMessage { amount, .. }| *amount),
-        )
-        .map_err(|_| Error::AmountOverflow)
-    }
-
-    /// Validate the mint request
-    pub fn validate(&self) -> Result<(), Error> {
-        if self.outputs.is_empty() {
-            return Err(Error::NoOutputs);
-        }
-
-        // Validate each output has positive amount
-        for output in &self.outputs {
-            if output.amount == Amount::ZERO {
-                return Err(Error::InvalidAmount);
-            }
-        }
-
-        // Ensure total doesn't overflow
-        self.amount_outputs()?;
-
-        Ok(())
     }
 }
 

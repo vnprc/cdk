@@ -660,6 +660,10 @@ impl MintPayment for Cln {
                 tracing::error!("Unsupported payment id for CLN");
                 return Err(payment::Error::UnknownPaymentState);
             }
+            PaymentIdentifier::MiningShareHash(_) => {
+                tracing::error!("Unsupported payment id for CLN");
+                return Err(payment::Error::UnknownPaymentState);
+            }
         };
 
         Ok(listinvoices_response
