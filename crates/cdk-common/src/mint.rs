@@ -3,7 +3,7 @@
 use bitcoin::bip32::DerivationPath;
 use cashu::util::unix_time;
 use cashu::{
-    Bolt11Invoice, MeltOptions, MeltQuoteBolt11Response, MintQuoteBolt11Response,
+    BlindedMessage, Bolt11Invoice, MeltOptions, MeltQuoteBolt11Response, MintQuoteBolt11Response,
     MintQuoteBolt12Response, MintQuoteMiningShareResponse, PaymentMethod,
 };
 use lightning::offers::offer::Offer;
@@ -50,6 +50,9 @@ pub struct MintQuote {
     /// Payment of payment(s) that filled quote
     #[serde(default)]
     pub issuance: Vec<Issuance>,
+    /// Blinded messages for mining shares (empty for other payment methods)
+    #[serde(default)]
+    pub blinded_messages: Vec<BlindedMessage>,
 }
 
 impl MintQuote {
@@ -69,6 +72,7 @@ impl MintQuote {
         created_time: u64,
         payments: Vec<IncomingPayment>,
         issuance: Vec<Issuance>,
+        blinded_messages: Vec<BlindedMessage>,
     ) -> Self {
         let id = id.unwrap_or(Uuid::new_v4());
 
@@ -86,6 +90,7 @@ impl MintQuote {
             payment_method,
             payments,
             issuance,
+            blinded_messages,
         }
     }
 

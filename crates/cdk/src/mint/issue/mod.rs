@@ -298,45 +298,15 @@ impl Mint {
                         Error::InvalidPaymentRequest
                     })?
             }
-            MintQuoteRequest::MiningShare(mining_request) => {
-                // Validate the mining share request first
-                mining_request
-                    .validate()
-                    .map_err(|_| Error::InvalidPaymentRequest)?;
-
-                unit = mining_request.unit;
-                amount = Some(mining_request.amount);
-                pubkey = mining_request.pubkey;
-                payment_method = PaymentMethod::MiningShare;
-                let header_hash = mining_request.header_hash.to_string();
-
-                self.check_mint_request_acceptable(amount, &unit, &payment_method)
-                    .await?;
-
-                let mint_ttl = self.localstore.get_quote_ttl().await?.mint_ttl;
-                let expiry = unix_time() + mint_ttl;
-
-                // For mining shares, we create a simple response with header hash as request
-                CreateIncomingPaymentResponse {
-                    request_lookup_id: PaymentIdentifier::MiningShareHash(header_hash.to_string()),
-                    request: header_hash.to_string(),
-                    expiry: Some(expiry),
-                }
+            MintQuoteRequest::MiningShare(_) => {
+                // Mining share quotes can only be created internally by the mint
+                // They are not available via HTTP API
+                return Err(Error::UnsupportedPaymentMethod);
             }
         };
 
-        // For mining shares, create quote as immediately paid
-        let (amount_paid, payments) = if payment_method == PaymentMethod::MiningShare {
-            let payment_amount = amount.expect("Mining share amount is always required");
-            let payment = IncomingPayment {
-                amount: payment_amount,
-                time: unix_time(),
-                payment_id: create_invoice_response.request_lookup_id.to_string(),
-            };
-            (payment_amount, vec![payment])
-        } else {
-            (Amount::ZERO, vec![])
-        };
+        // Non-mining share quotes start unpaid
+        let (amount_paid, payments) = (Amount::ZERO, vec![]);
 
         let quote = MintQuote::new(
             None,
@@ -351,7 +321,8 @@ impl Mint {
             payment_method.clone(),
             unix_time(),
             payments,
-            vec![],
+            vec![], // issuance
+            vec![], // blinded_messages (empty for non-mining shares)
         );
 
         tracing::debug!(
@@ -379,9 +350,8 @@ impl Mint {
                     .broadcast(NotificationPayload::MintQuoteBolt12Response(res));
             }
             PaymentMethod::MiningShare => {
-                let res: MintQuoteMiningShareResponse<Uuid> = quote.clone().try_into()?;
-                self.pubsub_manager
-                    .broadcast(NotificationPayload::MintQuoteMiningShareResponse(res));
+                // Mining share quotes should not be created via HTTP API
+                return Err(Error::UnsupportedPaymentMethod);
             }
             PaymentMethod::Custom(_) => {}
         }
@@ -537,6 +507,94 @@ impl Mint {
         self.check_mint_quote_paid(&mut quote).await?;
 
         quote.try_into()
+    }
+
+    /// Creates a mint quote for mining shares
+    ///
+    /// This function is called by the mint after the pool validates a share.
+    /// It creates a quote that is immediately marked as paid, allowing
+    /// the wallet to mint tokens using the pre-generated blinded messages.
+    ///
+    /// # Arguments
+    /// * `mint_quote_request` - The mining share request with blinded messages
+    ///
+    /// # Returns
+    /// * `MintQuote` - The created quote, ready for minting
+    /// * `Error` if validation fails or quote creation fails
+    #[instrument(skip_all)]
+    pub async fn create_mint_mining_share_quote(
+        &self,
+        mint_quote_request: MintQuoteMiningShareRequest,
+    ) -> Result<MintQuote, Error> {
+        // Validate the mining share request
+        mint_quote_request
+            .validate()
+            .map_err(|_| Error::InvalidPaymentRequest)?;
+
+        let unit = mint_quote_request.unit;
+        let amount = Some(mint_quote_request.amount);
+        let pubkey = mint_quote_request.pubkey;
+        let payment_method = PaymentMethod::MiningShare;
+        let header_hash = mint_quote_request.header_hash.to_string();
+
+        // Check mint request is acceptable for this payment method
+        self.check_mint_request_acceptable(amount, &unit, &payment_method)
+            .await?;
+
+        let mint_ttl = self.localstore.get_quote_ttl().await?.mint_ttl;
+        let expiry = unix_time() + mint_ttl;
+
+        // Create payment response for mining shares
+        let create_invoice_response = CreateIncomingPaymentResponse {
+            request_lookup_id: PaymentIdentifier::MiningShareHash(header_hash.to_string()),
+            request: header_hash.to_string(),
+            expiry: Some(expiry),
+        };
+
+        // Mining shares are immediately paid
+        let payment_amount = amount.expect("Mining share amount is always required");
+        let payment = IncomingPayment {
+            amount: payment_amount,
+            time: unix_time(),
+            payment_id: create_invoice_response.request_lookup_id.to_string(),
+        };
+
+        let quote = MintQuote::new(
+            None,
+            create_invoice_response.request.to_string(),
+            unit.clone(),
+            amount,
+            create_invoice_response.expiry.unwrap_or(0),
+            create_invoice_response.request_lookup_id.clone(),
+            pubkey,
+            payment_amount, // amount_paid
+            Amount::ZERO,   // amount_issued
+            payment_method.clone(),
+            unix_time(),
+            vec![payment],
+            vec![], // issuance
+            mint_quote_request.blinded_messages,
+        );
+
+        tracing::debug!(
+            "Created mining share mint quote {} for {} {} with header hash {}",
+            quote.id,
+            payment_amount,
+            unit,
+            header_hash,
+        );
+
+        // Store the quote in database
+        let mut tx = self.localstore.begin_transaction().await?;
+        tx.add_mint_quote(quote.clone()).await?;
+        tx.commit().await?;
+
+        // Broadcast notification
+        let res: MintQuoteMiningShareResponse<Uuid> = quote.clone().try_into()?;
+        self.pubsub_manager
+            .broadcast(NotificationPayload::MintQuoteMiningShareResponse(res));
+
+        Ok(quote)
     }
 
     /// Processes a mint request to issue new tokens

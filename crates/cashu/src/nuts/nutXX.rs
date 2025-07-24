@@ -12,7 +12,7 @@ use thiserror::Error;
 #[cfg(feature = "mint")]
 use uuid::Uuid;
 
-use super::{BlindSignature, CurrencyUnit, PublicKey};
+use super::{BlindSignature, BlindedMessage, CurrencyUnit, PublicKey};
 use crate::Amount;
 
 /// Mining share NUT error
@@ -39,6 +39,9 @@ pub enum Error {
     /// No outputs provided
     #[error("No outputs provided in request")]
     NoOutputs,
+    /// No blinded messages provided
+    #[error("No blinded messages provided in request")]
+    NoBlindedMessages,
 }
 
 /// Mining share mint quote request
@@ -58,6 +61,8 @@ pub struct MintQuoteMiningShareRequest {
     /// Optional pubkey for NUT-20 signature validation
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pubkey: Option<PublicKey>,
+    /// Blinded messages for minting
+    pub blinded_messages: Vec<BlindedMessage>,
 }
 
 impl MintQuoteMiningShareRequest {
@@ -71,6 +76,11 @@ impl MintQuoteMiningShareRequest {
         // Header hash validation - ensure it's not all zeros
         if self.header_hash.to_byte_array().iter().all(|&b| b == 0) {
             return Err(Error::InvalidHeaderHash);
+        }
+
+        // Ensure blinded messages are provided
+        if self.blinded_messages.is_empty() {
+            return Err(Error::NoBlindedMessages);
         }
 
         Ok(())

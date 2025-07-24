@@ -23,8 +23,8 @@ use cdk_common::secret::Secret;
 use cdk_common::state::check_state_transition;
 use cdk_common::util::unix_time;
 use cdk_common::{
-    Amount, BlindSignature, BlindSignatureDleq, CurrencyUnit, Id, MeltQuoteState, MintInfo,
-    PaymentMethod, Proof, Proofs, PublicKey, SecretKey, State,
+    Amount, BlindSignature, BlindSignatureDleq, BlindedMessage, CurrencyUnit, Id, MeltQuoteState,
+    MintInfo, PaymentMethod, Proof, Proofs, PublicKey, SecretKey, State,
 };
 use error::Error;
 use lightning_invoice::Bolt11Invoice;
@@ -554,10 +554,10 @@ VALUES (:quote_id, :amount, :timestamp);
         query(
             r#"
                 INSERT INTO mint_quote (
-                id, amount, unit, request, expiry, request_lookup_id, pubkey, created_time, payment_method, request_lookup_id_kind
+                id, amount, unit, request, expiry, request_lookup_id, pubkey, created_time, payment_method, request_lookup_id_kind, blinded_messages
                 )
                 VALUES (
-                :id, :amount, :unit, :request, :expiry, :request_lookup_id, :pubkey, :created_time, :payment_method, :request_lookup_id_kind
+                :id, :amount, :unit, :request, :expiry, :request_lookup_id, :pubkey, :created_time, :payment_method, :request_lookup_id_kind, :blinded_messages
                 )
             "#,
         )
@@ -574,6 +574,7 @@ VALUES (:quote_id, :amount, :timestamp);
         .bind(":created_time", quote.created_time as i64)
         .bind(":payment_method", quote.payment_method.to_string())
         .bind(":request_lookup_id_kind", quote.request_lookup_id.kind())
+        .bind(":blinded_messages", serde_json::to_string(&quote.blinded_messages)?)
         .execute(&self.inner)
         .await?;
 
@@ -763,7 +764,8 @@ VALUES (:quote_id, :amount, :timestamp);
                 amount_paid,
                 amount_issued,
                 payment_method,
-                request_lookup_id_kind
+                request_lookup_id_kind,
+                blinded_messages
             FROM
                 mint_quote
             WHERE id = :id"#,
@@ -827,7 +829,8 @@ VALUES (:quote_id, :amount, :timestamp);
                 amount_paid,
                 amount_issued,
                 payment_method,
-                request_lookup_id_kind
+                request_lookup_id_kind,
+                blinded_messages
             FROM
                 mint_quote
             WHERE request = :request"#,
@@ -1569,7 +1572,7 @@ fn sqlite_row_to_mint_quote(
     unpack_into!(
         let (
             id, amount, unit, request, expiry, request_lookup_id,
-            pubkey, created_time, amount_paid, amount_issued, payment_method, request_lookup_id_kind
+            pubkey, created_time, amount_paid, amount_issued, payment_method, request_lookup_id_kind, blinded_messages
         ) = row
     );
 
@@ -1591,6 +1594,12 @@ fn sqlite_row_to_mint_quote(
     let amount_issued: u64 = column_as_number!(amount_issued);
     let payment_method = column_as_string!(payment_method, PaymentMethod::from_str);
 
+    let blinded_messages_str = column_as_nullable_string!(&blinded_messages);
+    let blinded_messages: Vec<BlindedMessage> = match blinded_messages_str {
+        Some(json_str) => serde_json::from_str(&json_str)?,
+        None => vec![],
+    };
+
     Ok(MintQuote::new(
         Some(Uuid::parse_str(&id).map_err(|_| Error::InvalidUuid(id))?),
         request_str,
@@ -1606,6 +1615,7 @@ fn sqlite_row_to_mint_quote(
         column_as_number!(created_time),
         payments,
         issueances,
+        blinded_messages,
     ))
 }
 

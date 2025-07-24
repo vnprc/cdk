@@ -19,15 +19,14 @@ use crate::Wallet;
 impl Wallet {
     /// Creates a mint quote for mining shares with blinded secrets
     ///
-    /// Unlike bolt11/bolt12, mining shares generate secrets during quote creation
-    /// and store them for later use during minting. No HTTP call is made - the quote
-    /// will be submitted to the mint via a separate polling process.
+    /// Generates and stores quote and premint secrets locally, then returns
+    /// the request structure for transmission to pool via stratum protocol.
     #[instrument(skip_all)]
     pub async fn mint_mining_share_quote(
         &self,
         amount: Amount,
         header_hash: sha256::Hash,
-    ) -> Result<MintQuote, Error> {
+    ) -> Result<cdk_common::nuts::nutXX::MintQuoteMiningShareRequest, Error> {
         let unit = self.unit.clone();
 
         // Validate amount is within mining share limits (1-256)
@@ -83,11 +82,21 @@ impl Wallet {
             &amount_split_target,
         )?;
 
-        // Store the quote and secrets
+        // Store the quote and secrets locally
         self.localstore.add_mint_quote(quote.clone()).await?;
         self.localstore
-            .add_premint_secrets(&quote.id, premint_secrets)
+            .add_premint_secrets(&quote.id, premint_secrets.clone())
             .await?;
+
+        // Create request structure for stratum transmission
+        let mining_share_request = cdk_common::nuts::nutXX::MintQuoteMiningShareRequest {
+            amount,
+            unit: unit.clone(),
+            header_hash,
+            description: None,
+            pubkey: None, // TODO: NUT-20 support
+            blinded_messages: premint_secrets.blinded_messages().to_vec(),
+        };
 
         tracing::debug!(
             "Created mining share mint quote {} for {} {} with header hash {}",
@@ -97,7 +106,7 @@ impl Wallet {
             header_hash
         );
 
-        Ok(quote)
+        Ok(mining_share_request)
     }
 
     /// Retrieves mining share proofs using stored premint secrets
