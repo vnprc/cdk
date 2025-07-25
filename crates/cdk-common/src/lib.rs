@@ -30,4 +30,5 @@ pub use cashu::amount::{self, Amount};
 pub use cashu::lightning_invoice::{self, Bolt11Invoice};
 pub use cashu::nuts::{self, *};
 pub use cashu::{dhke, ensure_cdk, mint_url, secret, util, SECP256K1};
+pub use common::{QuotesSharesQuery, QuotesSharesResponse};
 pub use error::Error;
