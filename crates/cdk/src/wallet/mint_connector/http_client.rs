@@ -495,6 +495,21 @@ impl MintConnector for HttpClient {
         let auth_token = None;
         self.core.http_post(url, auth_token, &request).await
     }
+
+    /// Get quote IDs for share hashes
+    #[instrument(skip(self, share_hashes), fields(mint_url = %self.mint_url))]
+    async fn get_quotes_shares(
+        &self,
+        share_hashes: Vec<String>,
+    ) -> Result<QuotesSharesResponse, Error> {
+        let share_hashes_str = share_hashes.join(",");
+        let mut url = self
+            .mint_url
+            .join_paths(&["v1", "mint", "quote-ids", "share"])?;
+
+        url.set_query(Some(&format!("share_hashes={}", share_hashes_str)));
+        self.core.http_get(url, None).await
+    }
 }
 
 /// Http Client
