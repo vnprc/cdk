@@ -6,6 +6,33 @@ use crate::nuts::{Id, KeySetInfo, Keys};
 use crate::{Error, Wallet};
 
 impl Wallet {
+    /// Add a keyset to the local database and update keyset info
+    ///
+    /// Stores both the keyset keys and metadata in the local database.
+    /// Used for adding keysets without a network call.
+    pub async fn add_keyset(
+        &self,
+        keyset: crate::nuts::KeySet,
+        active: bool,
+        input_fee_ppk: u64,
+    ) -> Result<(), Error> {
+        self.localstore.add_keys(keyset.clone()).await?;
+
+        let keyset_info = KeySetInfo {
+            id: keyset.id,
+            active,
+            unit: self.unit.clone(),
+            input_fee_ppk,
+            final_expiry: keyset.final_expiry,
+        };
+
+        self.localstore
+            .add_mint_keysets(self.mint_url.clone(), vec![keyset_info])
+            .await?;
+
+        Ok(())
+    }
+
     /// Get keys for mint keyset
     ///
     /// Selected keys from localstore if they are already known
