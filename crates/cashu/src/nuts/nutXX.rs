@@ -63,6 +63,7 @@ pub struct MintQuoteMiningShareRequest {
     pub pubkey: Option<PublicKey>,
     /// Blinded messages for minting
     pub blinded_messages: Vec<BlindedMessage>,
+    // TODO should we add keyset ID?
 }
 
 impl MintQuoteMiningShareRequest {

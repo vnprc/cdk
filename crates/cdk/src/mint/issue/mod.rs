@@ -587,6 +587,16 @@ impl Mint {
         // Store the quote in database
         let mut tx = self.localstore.begin_transaction().await?;
         tx.add_mint_quote(quote.clone()).await?;
+
+        // Record the payment in mint_quote_payments table (mining shares are immediately paid)
+        // TODO add PENDING mining share quote support
+        tx.increment_mint_quote_amount_paid(
+            &quote.id,
+            payment_amount,
+            create_invoice_response.request_lookup_id.to_string(),
+        )
+        .await?;
+
         tx.commit().await?;
 
         // Broadcast notification
@@ -667,6 +677,7 @@ impl Mint {
                 }
                 mint_quote.amount_paid() - mint_quote.amount_issued()
             }
+            PaymentMethod::MiningShare => mint_quote.amount.ok_or(Error::AmountUndefined)?,
             _ => return Err(Error::UnsupportedPaymentMethod),
         };
 
