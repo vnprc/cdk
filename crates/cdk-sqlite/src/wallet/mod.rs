@@ -451,7 +451,10 @@ ON CONFLICT(id) DO UPDATE SET
                 request,
                 state,
                 expiry,
-                secret_key
+                secret_key,
+                payment_method,
+                amount_issued,
+                amount_paid
             FROM
                 mint_quote
             "#,
