@@ -571,24 +571,30 @@ pub(crate) async fn get_quotes_shares(
 
     let mut quote_ids = HashMap::new();
 
+    // use a transaction to avoid the broken non-tx implementation
     for share_hash in share_hashes {
         tracing::info!("Looking up request_lookup_id: {}", share_hash);
-        match state
-            .mint
-            .localstore
-            .get_mint_quote_by_request_lookup_id(&PaymentIdentifier::MiningShareHash(
-                share_hash.clone(),
-            ))
-            .await
-        {
-            Ok(Some(mint_quote)) => {
-                quote_ids.insert(share_hash, mint_quote.id.to_string());
-            }
-            Ok(None) => {
-                tracing::warn!("No quote found for request_lookup_id: {}", share_hash);
+        match state.mint.localstore.begin_transaction().await {
+            Ok(mut tx) => {
+                match tx
+                    .get_mint_quote_by_request_lookup_id(&PaymentIdentifier::MiningShareHash(
+                        share_hash.clone(),
+                    ))
+                    .await
+                {
+                    Ok(Some(mint_quote)) => {
+                        quote_ids.insert(share_hash, mint_quote.id.to_string());
+                    }
+                    Ok(None) => {
+                        tracing::warn!("No quote found for request_lookup_id: {}", share_hash);
+                    }
+                    Err(err) => {
+                        tracing::error!("Failed to get quote from database: {:?}", err);
+                    }
+                }
             }
             Err(err) => {
-                tracing::error!("Failed to get quote from database: {:?}", err);
+                tracing::error!("Failed to begin transaction: {:?}", err);
             }
         }
     }

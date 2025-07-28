@@ -2,7 +2,9 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use cdk_common::{MeltQuoteBolt12Request, MintQuoteBolt12Request, MintQuoteBolt12Response};
+use cdk_common::{
+    MeltQuoteBolt12Request, MintQuoteBolt12Request, MintQuoteBolt12Response, QuotesSharesResponse,
+};
 #[cfg(feature = "auth")]
 use cdk_common::{Method, ProtectedEndpoint, RoutePath};
 use reqwest::{Client, IntoUrl};
