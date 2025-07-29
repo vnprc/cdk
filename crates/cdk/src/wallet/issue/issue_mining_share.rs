@@ -53,8 +53,8 @@ impl Wallet {
             amount_paid: amount,
         };
 
-        // Get active keyset for this mint and unit
-        let active_keyset = self.get_active_mint_keyset().await?;
+        // Get active keyset for this mint and unit (local only, no network call)
+        let active_keyset = self.get_active_mint_keyset_local().await?;
 
         let amount_split_target = SplitTarget::default();
 
@@ -96,6 +96,7 @@ impl Wallet {
             description: None,
             pubkey: None, // TODO: NUT-20 support
             blinded_messages: premint_secrets.blinded_messages().to_vec(),
+            keyset_id: active_keyset.id,
         };
 
         tracing::debug!(
