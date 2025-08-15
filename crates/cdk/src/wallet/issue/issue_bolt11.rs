@@ -49,6 +49,17 @@ impl Wallet {
         amount: Amount,
         description: Option<String>,
     ) -> Result<MintQuote, Error> {
+        self.mint_quote_with_pubkey(amount, description, None).await
+    }
+
+    /// Creates new mint quote with optional locking pubkey for NUT-20
+    #[instrument(skip(self, locking_pubkey))]
+    pub async fn mint_quote_with_pubkey(
+        &self,
+        amount: Amount,
+        description: Option<String>,
+        locking_pubkey: Option<crate::nuts::PublicKey>,
+    ) -> Result<MintQuote, Error> {
         let mint_url = self.mint_url.clone();
         let unit = self.unit.clone();
 
@@ -70,13 +81,20 @@ impl Wallet {
             }
         }
 
-        let secret_key = SecretKey::generate();
+        // Use provided locking pubkey or generate a new one
+        let (pubkey, secret_key) = match locking_pubkey {
+            Some(pk) => (pk, None), // Use provided pubkey, no secret key stored
+            None => {
+                let sk = SecretKey::generate();
+                (sk.public_key(), Some(sk))
+            }
+        };
 
         let request = MintQuoteBolt11Request {
             amount,
             unit: unit.clone(),
             description,
-            pubkey: Some(secret_key.public_key()),
+            pubkey: Some(pubkey),
         };
 
         let quote_res = self.client.post_mint_quote(request).await?;
@@ -89,7 +107,7 @@ impl Wallet {
             unit,
             quote_res.request,
             quote_res.expiry.unwrap_or(0),
-            Some(secret_key),
+            secret_key,
         );
 
         self.localstore.add_mint_quote(quote.clone()).await?;

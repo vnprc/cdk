@@ -22,6 +22,8 @@ pub mod mint;
 #[cfg(feature = "wallet")]
 pub mod wallet;
 
+pub mod hashpool;
+
 #[cfg(all(any(feature = "wallet", feature = "mint"), feature = "auth"))]
 mod oidc_client;
 

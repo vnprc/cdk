@@ -44,6 +44,7 @@ mod verification;
 
 pub use builder::{MintBuilder, MintMeltLimits};
 pub use cdk_common::mint::{MeltQuote, MintKeySetInfo, MintQuote};
+pub use issue::MintQuoteResponse;
 pub use verification::Verification;
 
 /// Cashu Mint
@@ -559,6 +560,58 @@ impl Mint {
         }
 
         Ok(total_redeemed)
+    }
+
+    /// Lookup mint quotes by NUT-20 locking pubkeys
+    ///
+    /// Retrieve mint quote information by providing the public key(s) used to lock the mint quotes.
+    ///
+    /// # Arguments
+    /// * `pubkeys` - The public keys to lookup quotes for
+    ///
+    /// # Returns
+    /// * `Vec<MintQuoteLookupItem>` - The matching quotes
+    #[instrument(skip(self))]
+    pub async fn lookup_mint_quotes_by_pubkeys(
+        &self,
+        pubkeys: &[nuts::PublicKey],
+    ) -> Result<Vec<crate::hashpool::MintQuoteLookupItem>, Error> {
+        let quotes = self
+            .localstore
+            .get_mint_quotes_by_locking_keys(pubkeys)
+            .await?;
+
+        let mut lookup_items = Vec::new();
+        for quote in quotes {
+            if let Some(pubkey) = quote.pubkey {
+                // For mining shares, get keyset_id from the first blinded message
+                // For other payment methods, use a default or active keyset
+                let keyset_id = if quote.payment_method == nuts::PaymentMethod::MiningShare {
+                    // For mining shares, get keyset_id from the quote itself
+                    quote.keyset_id.unwrap_or_else(|| {
+                        // Fallback: get from first blinded message if quote doesn't have keyset_id
+                        quote
+                            .blinded_messages
+                            .first()
+                            .map(|bm| bm.keyset_id)
+                            .unwrap_or_else(|| nuts::Id::from_bytes(&[0; 8]).unwrap())
+                        // fallback id
+                    })
+                } else {
+                    nuts::Id::from_bytes(&[0; 8]).unwrap() // For non-mining-share quotes, keyset is determined at mint time
+                };
+
+                lookup_items.push(crate::hashpool::MintQuoteLookupItem {
+                    pubkey,
+                    quote: quote.id.to_string(),
+                    method: quote.payment_method.clone(),
+                    amount: quote.amount.unwrap_or_default(),
+                    keyset_id,
+                });
+            }
+        }
+
+        Ok(lookup_items)
     }
 }
 

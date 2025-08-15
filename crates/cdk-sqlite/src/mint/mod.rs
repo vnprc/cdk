@@ -554,10 +554,10 @@ VALUES (:quote_id, :amount, :timestamp);
         query(
             r#"
                 INSERT INTO mint_quote (
-                id, amount, unit, request, expiry, request_lookup_id, pubkey, created_time, payment_method, request_lookup_id_kind, blinded_messages
+                id, amount, unit, request, expiry, request_lookup_id, pubkey, created_time, payment_method, request_lookup_id_kind, blinded_messages, keyset_id
                 )
                 VALUES (
-                :id, :amount, :unit, :request, :expiry, :request_lookup_id, :pubkey, :created_time, :payment_method, :request_lookup_id_kind, :blinded_messages
+                :id, :amount, :unit, :request, :expiry, :request_lookup_id, :pubkey, :created_time, :payment_method, :request_lookup_id_kind, :blinded_messages, :keyset_id
                 )
             "#,
         )
@@ -575,6 +575,7 @@ VALUES (:quote_id, :amount, :timestamp);
         .bind(":payment_method", quote.payment_method.to_string())
         .bind(":request_lookup_id_kind", quote.request_lookup_id.kind())
         .bind(":blinded_messages", serde_json::to_string(&quote.blinded_messages)?)
+        .bind(":keyset_id", quote.keyset_id.map(|k| k.to_string()))
         .execute(&self.inner)
         .await?;
 
@@ -765,7 +766,8 @@ VALUES (:quote_id, :amount, :timestamp);
                 amount_issued,
                 payment_method,
                 request_lookup_id_kind,
-                blinded_messages
+                blinded_messages,
+                keyset_id
             FROM
                 mint_quote
             WHERE id = :id"#,
@@ -830,7 +832,8 @@ VALUES (:quote_id, :amount, :timestamp);
                 amount_issued,
                 payment_method,
                 request_lookup_id_kind,
-                blinded_messages
+                blinded_messages,
+                keyset_id
             FROM
                 mint_quote
             WHERE request = :request"#,
@@ -870,7 +873,8 @@ VALUES (:quote_id, :amount, :timestamp);
                 amount_issued,
                 payment_method,
                 request_lookup_id_kind,
-                blinded_messages
+                blinded_messages,
+                keyset_id
             FROM
                 mint_quote
             WHERE request_lookup_id = :request_lookup_id
@@ -918,7 +922,8 @@ impl MintQuotesDatabase for MintSqliteDatabase {
                 amount_issued,
                 payment_method,
                 request_lookup_id_kind,
-                blinded_messages
+                blinded_messages,
+                keyset_id
             FROM
                 mint_quote
             WHERE id = :id"#,
@@ -949,7 +954,8 @@ impl MintQuotesDatabase for MintSqliteDatabase {
                 amount_issued,
                 payment_method,
                 request_lookup_id_kind,
-                blinded_messages
+                blinded_messages,
+                keyset_id
             FROM
                 mint_quote
             WHERE request = :request"#,
@@ -989,7 +995,8 @@ impl MintQuotesDatabase for MintSqliteDatabase {
                 amount_issued,
                 payment_method,
                 request_lookup_id_kind,
-                blinded_messages
+                blinded_messages,
+                keyset_id
             FROM
                 mint_quote
             WHERE request_lookup_id = :request_lookup_id"#,
@@ -1030,11 +1037,62 @@ impl MintQuotesDatabase for MintSqliteDatabase {
                 amount_issued,
                 payment_method,
                 request_lookup_id_kind,
-                blinded_messages
+                blinded_messages,
+                keyset_id
             FROM
                 mint_quote
             "#,
         )
+        .fetch_all(&self.pool)
+        .await?
+        .into_iter()
+        .map(|row| sqlite_row_to_mint_quote(row, vec![], vec![]))
+        .collect::<Result<Vec<_>, _>>()?;
+
+        for quote in mint_quotes.as_mut_slice() {
+            let payments = get_mint_quote_payments(&self.pool, &quote.id).await?;
+            let issuance = get_mint_quote_issuance(&self.pool, &quote.id).await?;
+            quote.issuance = issuance;
+            quote.payments = payments;
+        }
+
+        Ok(mint_quotes)
+    }
+
+    async fn get_mint_quotes_by_locking_keys(
+        &self,
+        pubkeys: &[PublicKey],
+    ) -> Result<Vec<MintQuote>, Self::Err> {
+        if pubkeys.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let pubkey_strs: Vec<String> = pubkeys.iter().map(|pk| pk.to_hex()).collect();
+
+        let mut mint_quotes = query(
+            r#"
+            SELECT
+                id,
+                amount,
+                unit,
+                request,
+                expiry,
+                request_lookup_id,
+                pubkey,
+                created_time,
+                amount_paid,
+                amount_issued,
+                payment_method,
+                request_lookup_id_kind,
+                blinded_messages,
+                keyset_id
+            FROM
+                mint_quote
+            WHERE
+                pubkey IN (:pubkeys)
+            "#,
+        )
+        .bind_vec(":pubkeys", pubkey_strs)
         .fetch_all(&self.pool)
         .await?
         .into_iter()
@@ -1577,7 +1635,7 @@ fn sqlite_row_to_mint_quote(
     unpack_into!(
         let (
             id, amount, unit, request, expiry, request_lookup_id,
-            pubkey, created_time, amount_paid, amount_issued, payment_method, request_lookup_id_kind, blinded_messages
+            pubkey, created_time, amount_paid, amount_issued, payment_method, request_lookup_id_kind, blinded_messages, keyset_id
         ) = row
     );
 
@@ -1621,6 +1679,7 @@ fn sqlite_row_to_mint_quote(
         payments,
         issueances,
         blinded_messages,
+        column_as_nullable_string!(&keyset_id).and_then(|s| Id::from_str(&s).ok()), // keyset_id from database
     ))
 }
 

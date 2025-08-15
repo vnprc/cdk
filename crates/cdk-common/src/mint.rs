@@ -53,6 +53,9 @@ pub struct MintQuote {
     /// Blinded messages for mining shares (empty for other payment methods)
     #[serde(default)]
     pub blinded_messages: Vec<BlindedMessage>,
+    /// Keyset ID for mining share quotes (None for other payment methods where keyset is determined at mint time)
+    #[serde(default)]
+    pub keyset_id: Option<Id>,
 }
 
 impl MintQuote {
@@ -73,6 +76,7 @@ impl MintQuote {
         payments: Vec<IncomingPayment>,
         issuance: Vec<Issuance>,
         blinded_messages: Vec<BlindedMessage>,
+        keyset_id: Option<Id>,
     ) -> Self {
         let id = id.unwrap_or(Uuid::new_v4());
 
@@ -91,6 +95,7 @@ impl MintQuote {
             payments,
             issuance,
             blinded_messages,
+            keyset_id,
         }
     }
 

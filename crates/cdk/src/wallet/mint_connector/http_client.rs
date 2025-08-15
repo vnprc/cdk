@@ -512,6 +512,36 @@ impl MintConnector for HttpClient {
         url.set_query(Some(&format!("share_hashes={}", share_hashes_str)));
         self.core.http_get(url, None).await
     }
+
+    /// Lookup mint quotes by locking pubkeys
+    #[instrument(skip(self, request), fields(mint_url = %self.mint_url, pubkey_count = ?request.pubkeys.len()))]
+    async fn post_mint_quote_lookup(
+        &self,
+        request: crate::hashpool::PostMintQuoteLookupRequest,
+    ) -> Result<crate::hashpool::PostMintQuoteLookupResponse, Error> {
+        let url = self
+            .mint_url
+            .join_paths(&["v1", "mint", "quote", "lookup"])?;
+        let auth_token = self
+            .get_auth_token(Method::Post, RoutePath::MintQuoteLookup)
+            .await?;
+        self.core.http_post(url, auth_token, &request).await
+    }
+
+    /// Mining share mint quote
+    #[instrument(skip(self, request), fields(mint_url = %self.mint_url))]
+    async fn post_mint_mining_share_quote(
+        &self,
+        request: cdk_common::nuts::nutXX::MintQuoteMiningShareRequest,
+    ) -> Result<cdk_common::nuts::nutXX::MintQuoteMiningShareResponse<String>, Error> {
+        let url = self
+            .mint_url
+            .join_paths(&["v1", "mint", "quote", "mining-share"])?;
+        let auth_token = self
+            .get_auth_token(Method::Post, RoutePath::MintQuoteMiningShare)
+            .await?;
+        self.core.http_post(url, auth_token, &request).await
+    }
 }
 
 /// Http Client

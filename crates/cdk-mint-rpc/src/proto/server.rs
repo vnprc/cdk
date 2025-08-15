@@ -692,6 +692,7 @@ impl CdkMint for MintRPCServer {
                     vec![],                               // payments
                     vec![],                               // issuance
                     vec![],                               // blinded_messages
+                    None, // keyset_id (None for non-mining-share quotes)
                 );
 
                 let mut tx = self

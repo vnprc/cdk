@@ -95,7 +95,6 @@ impl Wallet {
             header_hash,
             description: None,
             pubkey: None, // TODO: NUT-20 support
-            blinded_messages: premint_secrets.blinded_messages().to_vec(),
             keyset_id: active_keyset.id,
         };
 
@@ -204,5 +203,203 @@ impl Wallet {
         }
 
         Ok(proofs)
+    }
+
+    /// Complete mining share minting flow for stratum proxy
+    ///
+    /// This function handles the complete flow when a stratum proxy needs to mint tokens
+    /// for quotes associated with a locking pubkey. It will:
+    /// 1. Query the mint for quote IDs by pubkey (using the lookup API)
+    /// 2. Generate blinded messages and mint directly from the mint
+    /// 3. Construct and store the resulting proofs
+    ///
+    /// # Arguments
+    /// * `pubkey` - The locking pubkey to lookup quotes for
+    /// * `secret_key` - Optional secret key for signing mint requests (required when quotes have pubkey locks)
+    ///
+    /// # Returns
+    /// * `Vec<Proof>` - All the minted proofs from found quotes
+    #[instrument(skip_all, fields(pubkey = %pubkey))]
+    pub async fn mint_tokens_for_pubkey(
+        &self,
+        pubkey: crate::nuts::PublicKey,
+        secret_key: Option<crate::nuts::SecretKey>,
+    ) -> Result<Vec<Proof>, Error> {
+        // 1. Query the mint for quote IDs by pubkey
+        tracing::debug!("Looking up quotes for pubkey: {}", pubkey);
+        let lookup_response = self.lookup_mint_quotes_by_pubkeys(&[pubkey]).await?;
+
+        if lookup_response.is_empty() {
+            tracing::debug!("No quotes found for pubkey: {}", pubkey);
+            return Ok(vec![]);
+        }
+
+        tracing::debug!(
+            "Found {} quotes for pubkey: {}",
+            lookup_response.len(),
+            pubkey
+        );
+
+        let mut all_proofs = Vec::new();
+
+        // 2. Process each quote: get details, generate blinded secrets, mint, store proofs
+        for quote_info in lookup_response {
+            tracing::debug!(
+                "Processing quote: {} (method: {:?})",
+                quote_info.quote,
+                quote_info.method
+            );
+
+            match quote_info.method {
+                crate::nuts::PaymentMethod::MiningShare => {
+                    // Use the actual quoted amount and keyset_id from the lookup response
+                    let amount = quote_info.amount;
+                    let keyset_id = quote_info.keyset_id;
+                    tracing::debug!(
+                        "Quote {} amount: {} using keyset: {}",
+                        quote_info.quote,
+                        amount,
+                        keyset_id
+                    );
+
+                    // Step 2: Generate blinded secrets and save quote locally
+                    let amount_split_target = SplitTarget::default();
+                    let num_secrets = amount
+                        .split_targeted(&amount_split_target)
+                        .unwrap_or_default()
+                        .len() as u32;
+
+                    let new_count = self
+                        .localstore
+                        .increment_keyset_counter(&keyset_id, num_secrets)
+                        .await?;
+                    let count = new_count - num_secrets;
+
+                    let premint_secrets = PreMintSecrets::from_xpriv(
+                        keyset_id,
+                        count,
+                        self.xpriv,
+                        amount,
+                        &amount_split_target,
+                    )?;
+
+                    // Save quote locally
+                    let wallet_quote = cdk_common::wallet::MintQuote {
+                        id: quote_info.quote.clone(),
+                        mint_url: self.mint_url.clone(),
+                        payment_method: cdk_common::PaymentMethod::MiningShare,
+                        amount: Some(amount),
+                        unit: self.unit.clone(),
+                        request: quote_info.quote.clone(),
+                        state: cdk_common::MintQuoteState::Paid,
+                        expiry: 0, // Mining shares don't expire
+                        secret_key: None,
+                        amount_issued: Amount::ZERO,
+                        amount_paid: amount,
+                    };
+
+                    self.localstore.add_mint_quote(wallet_quote).await?;
+                    self.localstore
+                        .add_premint_secrets(&quote_info.quote, premint_secrets.clone())
+                        .await?;
+
+                    // Step 3: Request mint with blinded messages
+                    let mut mint_request = cdk_common::nuts::MintRequest {
+                        quote: quote_info.quote.clone(),
+                        outputs: premint_secrets.blinded_messages().to_vec(),
+                        signature: None,
+                    };
+
+                    // Sign the request if we have a secret key (required for pubkey-locked quotes)
+                    if let Some(ref sk) = secret_key {
+                        mint_request.sign(sk.clone())?;
+                    }
+
+                    match self.client.post_mint(mint_request).await {
+                        Ok(mint_response) => {
+                            // Step 4: Construct proofs and store them
+                            let proofs =
+                                self.construct_proofs(&premint_secrets, &mint_response.signatures)?;
+
+                            let proof_infos: Result<Vec<_>, _> = proofs
+                                .iter()
+                                .map(|proof| {
+                                    ProofInfo::new(
+                                        proof.clone(),
+                                        self.mint_url.clone(),
+                                        State::Unspent,
+                                        self.unit.clone(),
+                                    )
+                                })
+                                .collect();
+
+                            self.localstore.update_proofs(proof_infos?, vec![]).await?;
+
+                            // Clean up: remove quote and premint secrets
+                            let _ = self.localstore.remove_mint_quote(&quote_info.quote).await;
+                            let _ = self
+                                .localstore
+                                .remove_premint_secrets(&quote_info.quote)
+                                .await;
+
+                            tracing::debug!(
+                                "Successfully minted {} proofs from quote: {}",
+                                proofs.len(),
+                                quote_info.quote
+                            );
+                            all_proofs.extend(proofs);
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to mint from quote {}: {}", quote_info.quote, e);
+                            // Clean up on failure
+                            let _ = self.localstore.remove_mint_quote(&quote_info.quote).await;
+                            let _ = self
+                                .localstore
+                                .remove_premint_secrets(&quote_info.quote)
+                                .await;
+                        }
+                    }
+                }
+                _ => {
+                    tracing::debug!(
+                        "Skipping non-mining-share quote: {} (method: {:?})",
+                        quote_info.quote,
+                        quote_info.method
+                    );
+                }
+            }
+        }
+
+        tracing::debug!(
+            "Successfully minted {} total proofs for pubkey: {}",
+            all_proofs.len(),
+            pubkey
+        );
+        Ok(all_proofs)
+    }
+
+    /// Mint tokens for multiple pubkeys
+    ///
+    /// Convenience function that looks up and mints tokens for multiple pubkeys at once
+    #[instrument(skip_all, fields(pubkey_count = %pubkeys.len()))]
+    pub async fn mint_tokens_for_pubkeys(
+        &self,
+        pubkeys: &[crate::nuts::PublicKey],
+    ) -> Result<Vec<Proof>, Error> {
+        let mut all_proofs = Vec::new();
+
+        for pubkey in pubkeys {
+            match self.mint_tokens_for_pubkey(*pubkey, None).await {
+                Ok(mut proofs) => {
+                    all_proofs.append(&mut proofs);
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to mint tokens for pubkey {}: {}", pubkey, e);
+                    // Continue with other pubkeys even if one fails
+                }
+            }
+        }
+
+        Ok(all_proofs)
     }
 }

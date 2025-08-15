@@ -323,6 +323,7 @@ impl Mint {
             payments,
             vec![], // issuance
             vec![], // blinded_messages (empty for non-mining shares)
+            None,   // keyset_id (determined at mint time for non-mining-share quotes)
         );
 
         tracing::debug!(
@@ -572,8 +573,9 @@ impl Mint {
             payment_method.clone(),
             unix_time(),
             vec![payment],
-            vec![], // issuance
-            mint_quote_request.blinded_messages,
+            vec![],                             // issuance
+            vec![],                             // blinded_messages
+            Some(mint_quote_request.keyset_id), // keyset_id for mining shares
         );
 
         tracing::debug!(

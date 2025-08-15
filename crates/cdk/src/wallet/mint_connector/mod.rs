@@ -79,6 +79,18 @@ pub trait MintConnector: Debug {
         share_hashes: Vec<String>,
     ) -> Result<QuotesSharesResponse, Error>;
 
+    /// Lookup mint quotes by locking pubkeys
+    async fn post_mint_quote_lookup(
+        &self,
+        request: crate::hashpool::PostMintQuoteLookupRequest,
+    ) -> Result<crate::hashpool::PostMintQuoteLookupResponse, Error>;
+
+    /// Mining share mint quote
+    async fn post_mint_mining_share_quote(
+        &self,
+        request: cdk_common::nuts::nutXX::MintQuoteMiningShareRequest,
+    ) -> Result<cdk_common::nuts::nutXX::MintQuoteMiningShareResponse<String>, Error>;
+
     /// Get the auth wallet for the client
     #[cfg(feature = "auth")]
     async fn get_auth_wallet(&self) -> Option<AuthWallet>;

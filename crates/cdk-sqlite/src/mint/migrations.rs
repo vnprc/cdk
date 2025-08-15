@@ -23,4 +23,5 @@ pub static MIGRATIONS: &[(&str, &str)] = &[
     ("20250626120251_rename_blind_message_y_to_b.sql", include_str!(r#"./migrations/20250626120251_rename_blind_message_y_to_b.sql"#)),
     ("20250706101057_bolt12.sql", include_str!(r#"./migrations/20250706101057_bolt12.sql"#)),
     ("20250724120000_mining_share_blinded_messages.sql", include_str!(r#"./migrations/20250724120000_mining_share_blinded_messages.sql"#)),
+    ("20250815120000_keyset_id_for_mining_shares.sql", include_str!(r#"./migrations/20250815120000_keyset_id_for_mining_shares.sql"#)),
 ];
