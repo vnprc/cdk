@@ -116,7 +116,9 @@ async fn test_hashpool_quote_lookup() -> anyhow::Result<()> {
     };
 
     // Now test the lookup functionality directly
-    let lookup_response = mint.lookup_mint_quotes_by_pubkeys(&[pubkey]).await?;
+    let lookup_response = mint
+        .lookup_mint_quotes_by_pubkeys(&[pubkey], cdk::hashpool::MintQuoteStateFilter::All)
+        .await?;
 
     // Verify the response
     assert_eq!(lookup_response.len(), 1);
@@ -168,7 +170,10 @@ async fn test_hashpool_quote_lookup_multiple_keys() -> anyhow::Result<()> {
 
     // Lookup both quotes
     let lookup_response = mint
-        .lookup_mint_quotes_by_pubkeys(&[pubkey1, pubkey2])
+        .lookup_mint_quotes_by_pubkeys(
+            &[pubkey1, pubkey2],
+            cdk::hashpool::MintQuoteStateFilter::All,
+        )
         .await?;
 
     // Should find both quotes
@@ -194,7 +199,9 @@ async fn test_hashpool_quote_lookup_empty_result() -> anyhow::Result<()> {
     let secret_key = SecretKey::generate();
     let pubkey = secret_key.public_key();
 
-    let lookup_response = mint.lookup_mint_quotes_by_pubkeys(&[pubkey]).await?;
+    let lookup_response = mint
+        .lookup_mint_quotes_by_pubkeys(&[pubkey], cdk::hashpool::MintQuoteStateFilter::All)
+        .await?;
 
     // Should return empty array
     assert_eq!(lookup_response.len(), 0);
@@ -233,7 +240,9 @@ async fn test_wallet_hashpool_quote_lookup() -> anyhow::Result<()> {
         .await?;
 
     // Now test the wallet lookup functionality
-    let lookup_response = wallet.lookup_mint_quotes_by_pubkeys(&[pubkey]).await?;
+    let lookup_response = wallet
+        .lookup_mint_quotes_by_pubkeys(&[pubkey], cdk::hashpool::MintQuoteStateFilter::All)
+        .await?;
 
     // Verify the response
     assert_eq!(lookup_response.len(), 1);
@@ -280,7 +289,10 @@ async fn test_wallet_hashpool_multiple_quote_lookup() -> anyhow::Result<()> {
 
     // Lookup both quotes via the wallet
     let lookup_response = wallet
-        .lookup_mint_quotes_by_pubkeys(&[pubkey1, pubkey2])
+        .lookup_mint_quotes_by_pubkeys(
+            &[pubkey1, pubkey2],
+            cdk::hashpool::MintQuoteStateFilter::All,
+        )
         .await?;
 
     // Should find both quotes

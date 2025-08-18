@@ -46,7 +46,7 @@ pub async fn post_mint_quote_lookup(
 
     let quotes = state
         .mint
-        .lookup_mint_quotes_by_pubkeys(&payload.pubkeys)
+        .lookup_mint_quotes_by_pubkeys(&payload.pubkeys, payload.state_filter)
         .await
         .map_err(into_response)?;
 

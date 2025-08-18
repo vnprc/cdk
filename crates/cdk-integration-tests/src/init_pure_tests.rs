@@ -224,7 +224,7 @@ impl MintConnector for DirectMintConnection {
     ) -> Result<cdk::hashpool::PostMintQuoteLookupResponse, Error> {
         let quotes = self
             .mint
-            .lookup_mint_quotes_by_pubkeys(&request.pubkeys)
+            .lookup_mint_quotes_by_pubkeys(&request.pubkeys, request.state_filter)
             .await?;
         Ok(cdk::hashpool::PostMintQuoteLookupResponse { quotes })
     }

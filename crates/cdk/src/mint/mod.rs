@@ -568,6 +568,7 @@ impl Mint {
     ///
     /// # Arguments
     /// * `pubkeys` - The public keys to lookup quotes for
+    /// * `state_filter` - Explicit state filter specifying which quotes to return
     ///
     /// # Returns
     /// * `Vec<MintQuoteLookupItem>` - The matching quotes
@@ -575,6 +576,7 @@ impl Mint {
     pub async fn lookup_mint_quotes_by_pubkeys(
         &self,
         pubkeys: &[nuts::PublicKey],
+        state_filter: crate::hashpool::MintQuoteStateFilter,
     ) -> Result<Vec<crate::hashpool::MintQuoteLookupItem>, Error> {
         let quotes = self
             .localstore
@@ -584,6 +586,28 @@ impl Mint {
         let mut lookup_items = Vec::new();
         for quote in quotes {
             if let Some(pubkey) = quote.pubkey {
+                // Apply state filtering
+                let quote_state = quote.state();
+                let should_include = match state_filter {
+                    crate::hashpool::MintQuoteStateFilter::All => true,
+                    crate::hashpool::MintQuoteStateFilter::OnlyPaid => {
+                        quote_state == nuts::MintQuoteState::Paid
+                    }
+                    crate::hashpool::MintQuoteStateFilter::OnlyUnpaid => {
+                        quote_state == nuts::MintQuoteState::Unpaid
+                    }
+                    crate::hashpool::MintQuoteStateFilter::OnlyIssued => {
+                        quote_state == nuts::MintQuoteState::Issued
+                    }
+                    crate::hashpool::MintQuoteStateFilter::Specific(filter_state) => {
+                        quote_state == filter_state
+                    }
+                };
+
+                if !should_include {
+                    continue;
+                }
+
                 // For mining shares, get keyset_id from the first blinded message
                 // For other payment methods, use a default or active keyset
                 let keyset_id = if quote.payment_method == nuts::PaymentMethod::MiningShare {

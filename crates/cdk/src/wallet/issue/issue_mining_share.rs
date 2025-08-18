@@ -225,9 +225,14 @@ impl Wallet {
         pubkey: crate::nuts::PublicKey,
         secret_key: Option<crate::nuts::SecretKey>,
     ) -> Result<Vec<Proof>, Error> {
-        // 1. Query the mint for quote IDs by pubkey
+        // 1. Query the mint for quote IDs by pubkey (only PAID/mintable quotes)
         tracing::debug!("Looking up quotes for pubkey: {}", pubkey);
-        let lookup_response = self.lookup_mint_quotes_by_pubkeys(&[pubkey]).await?;
+        let lookup_response = self
+            .lookup_mint_quotes_by_pubkeys(
+                &[pubkey],
+                crate::hashpool::MintQuoteStateFilter::OnlyPaid,
+            )
+            .await?;
 
         if lookup_response.is_empty() {
             tracing::debug!("No quotes found for pubkey: {}", pubkey);
@@ -252,6 +257,9 @@ impl Wallet {
 
             match quote_info.method {
                 crate::nuts::PaymentMethod::MiningShare => {
+                    // If the quote appears in the lookup response, attempt to mint it.
+                    // The mint will authoritatively reject if the quote is not mintable (e.g., already issued).
+
                     // Use the actual quoted amount and keyset_id from the lookup response
                     let amount = quote_info.amount;
                     let keyset_id = quote_info.keyset_id;
@@ -350,7 +358,28 @@ impl Wallet {
                             all_proofs.extend(proofs);
                         }
                         Err(e) => {
-                            tracing::warn!("Failed to mint from quote {}: {}", quote_info.quote, e);
+                            // Different error handling based on error type
+                            let error_msg = e.to_string();
+                            if error_msg.contains("already issued")
+                                || error_msg.contains("IssuedQuote")
+                            {
+                                tracing::debug!(
+                                    "Quote {} already issued, skipping",
+                                    quote_info.quote
+                                );
+                            } else if error_msg.contains("UnknownQuote") {
+                                tracing::debug!(
+                                    "Quote {} not found or expired, skipping",
+                                    quote_info.quote
+                                );
+                            } else {
+                                tracing::warn!(
+                                    "Failed to mint from quote {}: {}",
+                                    quote_info.quote,
+                                    e
+                                );
+                            }
+
                             // Clean up on failure
                             let _ = self.localstore.remove_mint_quote(&quote_info.quote).await;
                             let _ = self
