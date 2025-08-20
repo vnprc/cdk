@@ -1,120 +1,30 @@
 //! Mining Share Wallet Issue Functions
 //!
-//! This module implements wallet-side functions for creating and processing
+//! This module implements wallet-side functions for processing
 //! mining share mint quotes.
 
-use bitcoin::hashes::sha256;
 use cdk_common::nuts::{BlindSignature, PreMintSecrets, Proof};
 use tracing::instrument;
 
 use cdk_common::amount::SplitTarget;
 use cdk_common::common::ProofInfo;
 use cdk_common::nuts::State;
-use cdk_common::wallet::MintQuote;
 use cdk_common::Amount;
 
 use crate::wallet::Error;
 use crate::Wallet;
 
 impl Wallet {
-    /// Creates a mint quote for mining shares with blinded secrets
-    ///
-    /// Generates and stores quote and premint secrets locally, then returns
-    /// the request structure for transmission to pool via stratum protocol.
-    #[instrument(skip_all)]
-    pub async fn mint_mining_share_quote(
-        &self,
-        amount: Amount,
-        header_hash: sha256::Hash,
-    ) -> Result<cdk_common::nuts::nutXX::MintQuoteMiningShareRequest, Error> {
-        let unit = self.unit.clone();
-
-        // Validate amount is within mining share limits (1-256)
-        if amount == Amount::ZERO || amount > Amount::from(256) {
-            return Err(Error::AmountOutofLimitRange(
-                Amount::from(1),
-                Amount::from(256),
-                amount,
-            ));
-        }
-
-        let quote = MintQuote {
-            // TODO is there a better id value? mint will overwrite this
-            id: header_hash.to_string(),
-            mint_url: self.mint_url.clone(),
-            payment_method: cdk_common::PaymentMethod::MiningShare,
-            amount: Some(amount),
-            unit: unit.clone(),
-            request: header_hash.to_string(), // Use header hash as request identifier
-            state: cdk_common::MintQuoteState::Paid, // Mining shares are immediately paid
-            expiry: 0,                        // No expiry for mining shares
-            secret_key: None,
-            amount_issued: Amount::ZERO,
-            amount_paid: amount,
-        };
-
-        // Get active keyset for this mint and unit (local only, no network call)
-        let active_keyset = self.get_active_mint_keyset_local().await?;
-
-        let amount_split_target = SplitTarget::default();
-
-        // Calculate how many secrets we'll need (mining shares don't use spending conditions)
-        let num_secrets = amount
-            .split_targeted(&amount_split_target)
-            .unwrap_or_default()
-            .len() as u32;
-
-        // Atomically increment counter and get the new value
-        let new_count = self
-            .localstore
-            .increment_keyset_counter(&active_keyset.id, num_secrets)
-            .await?;
-
-        // Calculate the starting counter value for this batch (before our increment)
-        let count = new_count - num_secrets;
-
-        // Generate premint secrets using the counter value
-        let premint_secrets = PreMintSecrets::from_xpriv(
-            active_keyset.id,
-            count,
-            self.xpriv,
-            amount,
-            &amount_split_target,
-        )?;
-
-        // Store the quote and secrets locally
-        self.localstore.add_mint_quote(quote.clone()).await?;
-        self.localstore
-            .add_premint_secrets(&quote.id, premint_secrets.clone())
-            .await?;
-
-        // Create request structure for stratum transmission
-        let mining_share_request = cdk_common::nuts::nutXX::MintQuoteMiningShareRequest {
-            amount,
-            unit: unit.clone(),
-            header_hash,
-            description: None,
-            pubkey: None, // TODO: NUT-20 support
-            keyset_id: active_keyset.id,
-        };
-
-        tracing::debug!(
-            "Created mining share mint quote {} for {} {} with header hash {}",
-            quote.id,
-            amount,
-            unit,
-            header_hash
-        );
-
-        Ok(mining_share_request)
-    }
-
     /// Retrieves mining share proofs using stored premint secrets
     ///
     /// Retrieve blinded secrets, query the mint for blind signatures,
     /// construct and store proofs, delete separate secret store
     #[instrument(skip_all)]
-    pub async fn mint_mining_share(&self, quote_id: &str) -> Result<Vec<Proof>, Error> {
+    pub async fn mint_mining_share(
+        &self,
+        quote_id: &str,
+        secret_key: Option<crate::nuts::SecretKey>,
+    ) -> Result<Vec<Proof>, Error> {
         // Retrieve the quote
         let quote = self
             .localstore
@@ -139,32 +49,16 @@ impl Wallet {
             .ok_or(Error::PreMintSecretsNotFound)?;
 
         // Create mint request
-        let mint_request = cdk_common::nuts::MintRequest {
-            quote: quote_id.to_string(),
-            outputs: premint_secrets.blinded_messages().to_vec(),
-            signature: None,
-        };
+        let mint_request =
+            self.create_mint_request(quote_id, &premint_secrets, secret_key.as_ref())?;
 
         // Submit the mint request
         let mint_response = self.client.post_mint(mint_request).await?;
 
-        // Construct proofs from the response
-        let proofs = self.construct_proofs(&premint_secrets, &mint_response.signatures)?;
-
-        // Store the proofs
-        let proof_infos: Result<Vec<_>, _> = proofs
-            .iter()
-            .map(|proof| {
-                ProofInfo::new(
-                    proof.clone(),
-                    self.mint_url.clone(),
-                    State::Unspent,
-                    self.unit.clone(),
-                )
-            })
-            .collect();
-
-        self.localstore.update_proofs(proof_infos?, vec![]).await?;
+        // Store proofs constructed from the response
+        let proofs = self
+            .store_proofs_from_construction(&premint_secrets, &mint_response.signatures)
+            .await?;
 
         // Clean up premint secrets
         self.localstore.remove_premint_secrets(quote_id).await?;
@@ -203,6 +97,98 @@ impl Wallet {
         }
 
         Ok(proofs)
+    }
+
+    /// Stores proofs constructed from premint secrets and signatures
+    async fn store_proofs_from_construction(
+        &self,
+        premint_secrets: &PreMintSecrets,
+        signatures: &[BlindSignature],
+    ) -> Result<Vec<Proof>, Error> {
+        let proofs = self.construct_proofs(premint_secrets, signatures)?;
+
+        let proof_infos: Result<Vec<_>, _> = proofs
+            .iter()
+            .map(|proof| {
+                ProofInfo::new(
+                    proof.clone(),
+                    self.mint_url.clone(),
+                    State::Unspent,
+                    self.unit.clone(),
+                )
+            })
+            .collect();
+
+        self.localstore.update_proofs(proof_infos?, vec![]).await?;
+        Ok(proofs)
+    }
+
+    /// Clean up quote artifacts (quote and premint secrets)
+    async fn cleanup_quote_artifacts(&self, quote_id: &str) {
+        let _ = self.localstore.remove_mint_quote(quote_id).await;
+        let _ = self.localstore.remove_premint_secrets(quote_id).await;
+    }
+
+    /// Creates a mint request with optional signature
+    fn create_mint_request(
+        &self,
+        quote_id: &str,
+        premint_secrets: &PreMintSecrets,
+        secret_key: Option<&crate::nuts::SecretKey>,
+    ) -> Result<cdk_common::nuts::MintRequest<String>, Error> {
+        let mut mint_request = cdk_common::nuts::MintRequest {
+            quote: quote_id.to_string(),
+            outputs: premint_secrets.blinded_messages().to_vec(),
+            signature: None,
+        };
+
+        if let Some(sk) = secret_key {
+            mint_request.sign(sk.clone())?;
+        }
+
+        Ok(mint_request)
+    }
+
+    /// Handles mint errors with appropriate logging and returns whether to skip
+    fn handle_mint_error(&self, quote_id: &str, error: &Error) -> bool {
+        let error_msg = error.to_string();
+        if error_msg.contains("already issued") || error_msg.contains("IssuedQuote") {
+            tracing::debug!("Quote {} already issued, skipping", quote_id);
+            true
+        } else if error_msg.contains("UnknownQuote") {
+            tracing::debug!("Quote {} not found or expired, skipping", quote_id);
+            true
+        } else {
+            tracing::warn!("Failed to mint from quote {}: {}", quote_id, error);
+            false
+        }
+    }
+
+    /// Generates premint secrets for a given amount and keyset
+    async fn generate_premint_secrets_for_amount(
+        &self,
+        amount: Amount,
+        keyset_id: cdk_common::nuts::Id,
+    ) -> Result<PreMintSecrets, Error> {
+        let amount_split_target = SplitTarget::default();
+        let num_secrets = amount
+            .split_targeted(&amount_split_target)
+            .unwrap_or_default()
+            .len() as u32;
+
+        let new_count = self
+            .localstore
+            .increment_keyset_counter(&keyset_id, num_secrets)
+            .await?;
+        let count = new_count - num_secrets;
+
+        Ok(PreMintSecrets::from_xpriv(
+            keyset_id,
+            count,
+            self.xpriv,
+            amount,
+            &amount_split_target,
+        )?)
     }
 
     /// Complete mining share minting flow for stratum proxy
@@ -271,25 +257,9 @@ impl Wallet {
                     );
 
                     // Step 2: Generate blinded secrets and save quote locally
-                    let amount_split_target = SplitTarget::default();
-                    let num_secrets = amount
-                        .split_targeted(&amount_split_target)
-                        .unwrap_or_default()
-                        .len() as u32;
-
-                    let new_count = self
-                        .localstore
-                        .increment_keyset_counter(&keyset_id, num_secrets)
+                    let premint_secrets = self
+                        .generate_premint_secrets_for_amount(amount, keyset_id)
                         .await?;
-                    let count = new_count - num_secrets;
-
-                    let premint_secrets = PreMintSecrets::from_xpriv(
-                        keyset_id,
-                        count,
-                        self.xpriv,
-                        amount,
-                        &amount_split_target,
-                    )?;
 
                     // Save quote locally
                     let wallet_quote = cdk_common::wallet::MintQuote {
@@ -311,45 +281,12 @@ impl Wallet {
                         .add_premint_secrets(&quote_info.quote, premint_secrets.clone())
                         .await?;
 
-                    // Step 3: Request mint with blinded messages
-                    let mut mint_request = cdk_common::nuts::MintRequest {
-                        quote: quote_info.quote.clone(),
-                        outputs: premint_secrets.blinded_messages().to_vec(),
-                        signature: None,
-                    };
-
-                    // Sign the request if we have a secret key (required for pubkey-locked quotes)
-                    if let Some(ref sk) = secret_key {
-                        mint_request.sign(sk.clone())?;
-                    }
-
-                    match self.client.post_mint(mint_request).await {
-                        Ok(mint_response) => {
-                            // Step 4: Construct proofs and store them
-                            let proofs =
-                                self.construct_proofs(&premint_secrets, &mint_response.signatures)?;
-
-                            let proof_infos: Result<Vec<_>, _> = proofs
-                                .iter()
-                                .map(|proof| {
-                                    ProofInfo::new(
-                                        proof.clone(),
-                                        self.mint_url.clone(),
-                                        State::Unspent,
-                                        self.unit.clone(),
-                                    )
-                                })
-                                .collect();
-
-                            self.localstore.update_proofs(proof_infos?, vec![]).await?;
-
-                            // Clean up: remove quote and premint secrets
-                            let _ = self.localstore.remove_mint_quote(&quote_info.quote).await;
-                            let _ = self
-                                .localstore
-                                .remove_premint_secrets(&quote_info.quote)
-                                .await;
-
+                    // Step 3: Use mint_mining_share to handle the minting
+                    match self
+                        .mint_mining_share(&quote_info.quote, secret_key.clone())
+                        .await
+                    {
+                        Ok(proofs) => {
                             tracing::debug!(
                                 "Successfully minted {} proofs from quote: {}",
                                 proofs.len(),
@@ -358,34 +295,10 @@ impl Wallet {
                             all_proofs.extend(proofs);
                         }
                         Err(e) => {
-                            // Different error handling based on error type
-                            let error_msg = e.to_string();
-                            if error_msg.contains("already issued")
-                                || error_msg.contains("IssuedQuote")
-                            {
-                                tracing::debug!(
-                                    "Quote {} already issued, skipping",
-                                    quote_info.quote
-                                );
-                            } else if error_msg.contains("UnknownQuote") {
-                                tracing::debug!(
-                                    "Quote {} not found or expired, skipping",
-                                    quote_info.quote
-                                );
-                            } else {
-                                tracing::warn!(
-                                    "Failed to mint from quote {}: {}",
-                                    quote_info.quote,
-                                    e
-                                );
-                            }
+                            self.handle_mint_error(&quote_info.quote, &e);
 
-                            // Clean up on failure
-                            let _ = self.localstore.remove_mint_quote(&quote_info.quote).await;
-                            let _ = self
-                                .localstore
-                                .remove_premint_secrets(&quote_info.quote)
-                                .await;
+                            // Clean up on failure - mint_mining_share doesn't clean up on error
+                            self.cleanup_quote_artifacts(&quote_info.quote).await;
                         }
                     }
                 }
