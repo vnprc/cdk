@@ -41,12 +41,13 @@ impl Wallet {
             return Err(Error::UnpaidQuote);
         }
 
-        // Retrieve stored secrets
+        // Generate premint secrets inline from quote amount and active keyset
+        // TODO retrieve the keyset ID saved on the quote at the mint
+        let active_keyset_id: cdk_common::Id = self.get_active_mint_keyset().await?.id;
+        let amount = quote.amount.ok_or(Error::AmountUndefined)?;
         let premint_secrets = self
-            .localstore
-            .get_premint_secrets(quote_id)
-            .await?
-            .ok_or(Error::PreMintSecretsNotFound)?;
+            .generate_premint_secrets_for_amount(amount, active_keyset_id)
+            .await?;
 
         // Create mint request
         let mint_request =
@@ -59,9 +60,6 @@ impl Wallet {
         let proofs = self
             .store_proofs_from_construction(&premint_secrets, &mint_response.signatures)
             .await?;
-
-        // Clean up premint secrets
-        self.localstore.remove_premint_secrets(quote_id).await?;
 
         tracing::debug!(
             "Successfully minted {} mining share proofs for quote {}",
@@ -121,12 +119,6 @@ impl Wallet {
 
         self.localstore.update_proofs(proof_infos?, vec![]).await?;
         Ok(proofs)
-    }
-
-    /// Clean up quote artifacts (quote and premint secrets)
-    async fn cleanup_quote_artifacts(&self, quote_id: &str) {
-        let _ = self.localstore.remove_mint_quote(quote_id).await;
-        let _ = self.localstore.remove_premint_secrets(quote_id).await;
     }
 
     /// Creates a mint request with optional signature
@@ -256,12 +248,7 @@ impl Wallet {
                         keyset_id
                     );
 
-                    // Step 2: Generate blinded secrets and save quote locally
-                    let premint_secrets = self
-                        .generate_premint_secrets_for_amount(amount, keyset_id)
-                        .await?;
-
-                    // Save quote locally
+                    // Step 2: Save quote locally
                     let wallet_quote = cdk_common::wallet::MintQuote {
                         id: quote_info.quote.clone(),
                         mint_url: self.mint_url.clone(),
@@ -277,9 +264,6 @@ impl Wallet {
                     };
 
                     self.localstore.add_mint_quote(wallet_quote).await?;
-                    self.localstore
-                        .add_premint_secrets(&quote_info.quote, premint_secrets.clone())
-                        .await?;
 
                     // Step 3: Use mint_mining_share to handle the minting
                     match self
@@ -297,8 +281,8 @@ impl Wallet {
                         Err(e) => {
                             self.handle_mint_error(&quote_info.quote, &e);
 
-                            // Clean up on failure - mint_mining_share doesn't clean up on error
-                            self.cleanup_quote_artifacts(&quote_info.quote).await;
+                            // Clean up quote on failure
+                            let _ = self.localstore.remove_mint_quote(&quote_info.quote).await;
                         }
                     }
                 }

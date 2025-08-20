@@ -14,8 +14,8 @@ use cdk_common::nuts::{MeltQuoteState, MintQuoteState};
 use cdk_common::secret::Secret;
 use cdk_common::wallet::{self, MintQuote, Transaction, TransactionDirection, TransactionId};
 use cdk_common::{
-    database, Amount, CurrencyUnit, Id, KeySet, KeySetInfo, Keys, MintInfo, PaymentMethod,
-    PreMintSecrets, Proof, ProofDleq, PublicKey, SecretKey, SpendingConditions, State,
+    database, Amount, CurrencyUnit, Id, KeySet, KeySetInfo, Keys, MintInfo, PaymentMethod, Proof,
+    ProofDleq, PublicKey, SecretKey, SpendingConditions, State,
 };
 use error::Error;
 use tracing::instrument;
@@ -911,67 +911,6 @@ ON CONFLICT(id) DO UPDATE SET
     async fn remove_transaction(&self, transaction_id: TransactionId) -> Result<(), Self::Err> {
         Statement::new(r#"DELETE FROM transactions WHERE id=:id"#)
             .bind(":id", transaction_id.as_slice().to_vec())
-            .execute(&self.pool.get().map_err(Error::Pool)?)
-            .map_err(Error::Sqlite)?;
-
-        Ok(())
-    }
-
-    #[instrument(skip(self, secrets))]
-    async fn add_premint_secrets(
-        &self,
-        quote_id: &str,
-        secrets: PreMintSecrets,
-    ) -> Result<(), Self::Err> {
-        let secrets_json = serde_json::to_string(&secrets).map_err(Error::from)?;
-
-        Statement::new(
-            r#"
-            INSERT INTO premint_secrets (quote_id, secrets)
-            VALUES (:quote_id, :secrets)
-            ON CONFLICT(quote_id) DO UPDATE SET
-                secrets = excluded.secrets
-            "#,
-        )
-        .bind(":quote_id", quote_id.to_string())
-        .bind(":secrets", secrets_json)
-        .execute(&self.pool.get().map_err(Error::Pool)?)
-        .map_err(Error::Sqlite)?;
-
-        Ok(())
-    }
-
-    #[instrument(skip(self))]
-    async fn get_premint_secrets(
-        &self,
-        quote_id: &str,
-    ) -> Result<Option<PreMintSecrets>, Self::Err> {
-        let result = Statement::new(
-            r#"
-            SELECT secrets 
-            FROM premint_secrets 
-            WHERE quote_id = :quote_id
-            "#,
-        )
-        .bind(":quote_id", quote_id.to_string())
-        .plunk(&self.pool.get().map_err(Error::Pool)?)
-        .map_err(Error::Sqlite)?;
-
-        match result {
-            Some(secrets_column) => {
-                let secrets_str = column_as_string!(secrets_column);
-                let premint_secrets: PreMintSecrets =
-                    serde_json::from_str(&secrets_str).map_err(Error::from)?;
-                Ok(Some(premint_secrets))
-            }
-            None => Ok(None),
-        }
-    }
-
-    #[instrument(skip(self))]
-    async fn remove_premint_secrets(&self, quote_id: &str) -> Result<(), Self::Err> {
-        Statement::new(r#"DELETE FROM premint_secrets WHERE quote_id = :quote_id"#)
-            .bind(":quote_id", quote_id.to_string())
             .execute(&self.pool.get().map_err(Error::Pool)?)
             .map_err(Error::Sqlite)?;
 

@@ -18,5 +18,4 @@ pub static MIGRATIONS: &[(&str, &str)] = &[
     ("20250401120000_add_transactions_table.sql", include_str!(r#"./migrations/20250401120000_add_transactions_table.sql"#)),
     ("20250616144830_add_keyset_expiry.sql", include_str!(r#"./migrations/20250616144830_add_keyset_expiry.sql"#)),
     ("20250707093445_bolt12.sql", include_str!(r#"./migrations/20250707093445_bolt12.sql"#)),
-    ("20250722225702_create_premint_secrets_table.sql", include_str!(r#"./migrations/20250722225702_create_premint_secrets_table.sql"#)),
 ];
