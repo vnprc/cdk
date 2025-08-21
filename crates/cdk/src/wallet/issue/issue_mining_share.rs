@@ -41,12 +41,25 @@ impl Wallet {
             return Err(Error::UnpaidQuote);
         }
 
-        // Generate premint secrets inline from quote amount and active keyset
-        // TODO retrieve the keyset ID saved on the quote at the mint
-        let active_keyset_id: cdk_common::Id = self.get_active_mint_keyset().await?.id;
+        // Generate premint secrets
+        let keyset_id = match quote.keyset_id {
+            Some(id) => id,
+            None => {
+                // Fallback to active keyset
+                // TODO or should we just throw an error?
+                let active_keyset_id = self.get_active_mint_keyset().await?.id;
+                tracing::error!(
+                    "Quote {} missing keyset_id, falling back to active keyset {}. This may cause minting failures if the mint expects a different keyset.",
+                    quote_id,
+                    active_keyset_id
+                );
+                active_keyset_id
+            }
+        };
+
         let amount = quote.amount.ok_or(Error::AmountUndefined)?;
         let premint_secrets = self
-            .generate_premint_secrets_for_amount(amount, active_keyset_id)
+            .generate_premint_secrets_for_amount(amount, keyset_id)
             .await?;
 
         // Create mint request
@@ -261,6 +274,7 @@ impl Wallet {
                         secret_key: None,
                         amount_issued: Amount::ZERO,
                         amount_paid: amount,
+                        keyset_id: Some(keyset_id),
                     };
 
                     self.localstore.add_mint_quote(wallet_quote).await?;
