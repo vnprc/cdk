@@ -32,5 +32,4 @@ pub use cashu::nuts::{self, *};
 #[cfg(feature = "mint")]
 pub use cashu::quote_id::{self, *};
 pub use cashu::{dhke, ensure_cdk, mint_url, secret, util, SECP256K1};
-pub use common::{QuotesSharesQuery, QuotesSharesResponse};
 pub use error::Error;

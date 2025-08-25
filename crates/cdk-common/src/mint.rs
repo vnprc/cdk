@@ -4,7 +4,7 @@ use bitcoin::bip32::DerivationPath;
 use cashu::quote_id::QuoteId;
 use cashu::util::unix_time;
 use cashu::{
-    BlindedMessage, Bolt11Invoice, MeltOptions, MeltQuoteBolt11Response, MintQuoteBolt11Response,
+    Bolt11Invoice, MeltOptions, MeltQuoteBolt11Response, MintQuoteBolt11Response,
     MintQuoteBolt12Response, MintQuoteMiningShareResponse, PaymentMethod,
 };
 use lightning::offers::offer::Offer;
@@ -51,11 +51,7 @@ pub struct MintQuote {
     /// Payment of payment(s) that filled quote
     #[serde(default)]
     pub issuance: Vec<Issuance>,
-    // TODO remove
-    /// Blinded messages for mining shares (empty for other payment methods)
-    #[serde(default)]
-    pub blinded_messages: Vec<BlindedMessage>,
-    /// Keyset ID for mining share quotes (None for other payment methods where keyset is determined at mint time)
+    /// Keyset ID for mining share quotes
     #[serde(default)]
     pub keyset_id: Option<Id>,
 }
@@ -77,8 +73,6 @@ impl MintQuote {
         created_time: u64,
         payments: Vec<IncomingPayment>,
         issuance: Vec<Issuance>,
-        // TODO remove
-        blinded_messages: Vec<BlindedMessage>,
         keyset_id: Option<Id>,
     ) -> Self {
         let id = id.unwrap_or_else(QuoteId::new_uuid);
@@ -97,8 +91,6 @@ impl MintQuote {
             payment_method,
             payments,
             issuance,
-            // TODO remove
-            blinded_messages,
             keyset_id,
         }
     }
@@ -405,13 +397,16 @@ impl TryFrom<crate::mint::MintQuote> for MintQuoteMiningShareResponse<QuoteId> {
     type Error = crate::Error;
 
     fn try_from(mint_quote: crate::mint::MintQuote) -> Result<Self, Self::Error> {
+        let pubkey = mint_quote
+            .pubkey
+            .ok_or(crate::Error::InvalidPaymentRequest)?;
         Ok(MintQuoteMiningShareResponse {
             quote: mint_quote.id,
             request: mint_quote.request,
             amount: mint_quote.amount,
             unit: Some(mint_quote.unit),
             expiry: Some(mint_quote.expiry),
-            pubkey: mint_quote.pubkey,
+            pubkey,
         })
     }
 }

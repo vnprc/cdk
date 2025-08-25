@@ -63,7 +63,7 @@ pub struct MintQuote {
     /// Amount paid to the mint for the quote
     #[serde(default)]
     pub amount_paid: Amount,
-    /// Keyset ID for mining share quotes (None for other payment methods)
+    /// Keyset ID for mining share quotes
     #[serde(default)]
     pub keyset_id: Option<Id>,
 }

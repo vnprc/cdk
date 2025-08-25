@@ -3,9 +3,7 @@ use std::collections::HashSet;
 use std::sync::{Arc, RwLock as StdRwLock};
 
 use async_trait::async_trait;
-use cdk_common::{
-    MeltQuoteBolt12Request, MintQuoteBolt12Request, MintQuoteBolt12Response, QuotesSharesResponse,
-};
+use cdk_common::{MeltQuoteBolt12Request, MintQuoteBolt12Request, MintQuoteBolt12Response};
 #[cfg(feature = "auth")]
 use cdk_common::{Method, ProtectedEndpoint, RoutePath};
 use serde::de::DeserializeOwned;
@@ -524,21 +522,6 @@ where
             &request,
         )
         .await
-    }
-
-    /// Get quote IDs for share hashes
-    #[instrument(skip(self, share_hashes), fields(mint_url = %self.mint_url))]
-    async fn get_quotes_shares(
-        &self,
-        share_hashes: Vec<String>,
-    ) -> Result<QuotesSharesResponse, Error> {
-        let share_hashes_str = share_hashes.join(",");
-        let mut url = self
-            .mint_url
-            .join_paths(&["v1", "mint", "quote-ids", "share"])?;
-
-        url.set_query(Some(&format!("share_hashes={}", share_hashes_str)));
-        self.core.http_get(url, None).await
     }
 
     /// Lookup mint quotes by locking pubkeys

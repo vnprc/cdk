@@ -9,6 +9,7 @@ use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 use std::string::FromUtf8Error;
 
+use lightning_invoice::Currency;
 use serde::{de, Deserialize, Deserializer, Serialize};
 use thiserror::Error;
 
@@ -569,6 +570,8 @@ pub enum CurrencyUnit {
     Eur,
     /// Auth
     Auth,
+    /// Ehash
+    Hash,
     /// Custom currency unit
     Custom(String),
 }
@@ -583,6 +586,7 @@ impl CurrencyUnit {
             Self::Usd => Some(2),
             Self::Eur => Some(3),
             Self::Auth => Some(4),
+            Self::Hash => Some(5),
             _ => None,
         }
     }
@@ -598,6 +602,7 @@ impl FromStr for CurrencyUnit {
             "USD" => Ok(Self::Usd),
             "EUR" => Ok(Self::Eur),
             "AUTH" => Ok(Self::Auth),
+            "HASH" => Ok(Self::Hash),
             // TODO upstream this fix and move CurrencyUnit to nut01
             _ => Ok(Self::Custom(upper_value.to_string())),
         }
@@ -612,6 +617,7 @@ impl fmt::Display for CurrencyUnit {
             CurrencyUnit::Usd => "USD",
             CurrencyUnit::Eur => "EUR",
             CurrencyUnit::Auth => "AUTH",
+            CurrencyUnit::Hash => "HASH",
             CurrencyUnit::Custom(unit) => unit,
         };
         if let Some(width) = f.width() {
@@ -700,7 +706,7 @@ impl<'de> Deserialize<'de> for PaymentMethod {
 
 /// PreMint
 #[cfg(feature = "wallet")]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PreMint {
     /// Blinded message
     pub blinded_message: BlindedMessage,
@@ -728,7 +734,7 @@ impl PartialOrd for PreMint {
 
 /// Premint Secrets
 #[cfg(feature = "wallet")]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PreMintSecrets {
     /// Secrets
     pub secrets: Vec<PreMint>,

@@ -23,6 +23,7 @@ impl Wallet {
     pub async fn mint_mining_share(
         &self,
         quote_id: &str,
+        // TODO make mandatory
         secret_key: Option<crate::nuts::SecretKey>,
     ) -> Result<Vec<Proof>, Error> {
         // Retrieve the quote
@@ -144,6 +145,7 @@ impl Wallet {
         let mut mint_request = cdk_common::nuts::MintRequest {
             quote: quote_id.to_string(),
             outputs: premint_secrets.blinded_messages().to_vec(),
+            // TODO why hard code to None? fix this
             signature: None,
         };
 
@@ -196,7 +198,7 @@ impl Wallet {
         )?)
     }
 
-    /// Complete mining share minting flow for stratum proxy
+    /// Complete mining share minting flow
     ///
     /// This function handles the complete flow when a stratum proxy needs to mint tokens
     /// for quotes associated with a locking pubkey. It will:
@@ -214,6 +216,7 @@ impl Wallet {
     pub async fn mint_tokens_for_pubkey(
         &self,
         pubkey: crate::nuts::PublicKey,
+        // TODO make mandatory
         secret_key: Option<crate::nuts::SecretKey>,
     ) -> Result<Vec<Proof>, Error> {
         // 1. Query the mint for quote IDs by pubkey (only PAID/mintable quotes)
@@ -270,7 +273,8 @@ impl Wallet {
                         unit: self.unit.clone(),
                         request: quote_info.quote.clone(),
                         state: cdk_common::MintQuoteState::Paid,
-                        expiry: 0, // Mining shares don't expire
+                        // TODO set an expiry
+                        expiry: 0,
                         secret_key: None,
                         amount_issued: Amount::ZERO,
                         amount_paid: amount,

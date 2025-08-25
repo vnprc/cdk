@@ -1,6 +1,6 @@
 ALTER TABLE mint_quote ADD COLUMN amount_paid INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE mint_quote ADD COLUMN amount_issued INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE mint_quote ADD COLUMN payment_method TEXT NOT NULL DEFAULT 'bolt11';
+ALTER TABLE mint_quote ADD COLUMN amount_minted INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE mint_quote ADD COLUMN payment_method TEXT NOT NULL DEFAULT 'BOLT11';
 
 -- Remove NOT NULL constraint from amount column
 PRAGMA foreign_keys=off;
@@ -42,7 +42,7 @@ SELECT
     state, 
     expiry, 
     0, -- Default value for amount_paid
-    0, -- Default value for amount_issued
+    0, -- Default value for amount_minted
     secret_key
 FROM mint_quote;
 

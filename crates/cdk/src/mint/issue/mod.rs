@@ -650,14 +650,13 @@ impl Mint {
             amount,
             create_invoice_response.expiry.unwrap_or(0),
             create_invoice_response.request_lookup_id.clone(),
-            pubkey,
+            Some(pubkey),
             payment_amount, // amount_paid
             Amount::ZERO,   // amount_issued
             payment_method.clone(),
             unix_time(),
             vec![payment],
             vec![],                             // issuance
-            vec![],                             // blinded_messages
             Some(mint_quote_request.keyset_id), // keyset_id for mining shares
         );
 

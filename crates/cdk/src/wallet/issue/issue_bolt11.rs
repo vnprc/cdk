@@ -86,6 +86,7 @@ impl Wallet {
         // Use provided locking pubkey or generate a new one
         let (pubkey, secret_key) = match locking_pubkey {
             Some(pk) => (pk, None), // Use provided pubkey, no secret key stored
+            // TODO clean up this broken LLM garbage
             None => {
                 let sk = SecretKey::generate();
                 (sk.public_key(), Some(sk))

@@ -1023,16 +1023,8 @@ impl Mint {
                 // For mining shares, get keyset_id from the first blinded message
                 // For other payment methods, use a default or active keyset
                 let keyset_id = if quote.payment_method == nuts::PaymentMethod::MiningShare {
-                    // For mining shares, get keyset_id from the quote itself
-                    quote.keyset_id.unwrap_or_else(|| {
-                        // Fallback: get from first blinded message if quote doesn't have keyset_id
-                        quote
-                            .blinded_messages
-                            .first()
-                            .map(|bm| bm.keyset_id)
-                            .unwrap_or_else(|| nuts::Id::from_bytes(&[0; 8]).unwrap())
-                        // fallback id
-                    })
+                    // For mining shares, keyset_id must be present
+                    quote.keyset_id.ok_or(Error::UnknownKeySet)?
                 } else {
                     nuts::Id::from_bytes(&[0; 8]).unwrap() // For non-mining-share quotes, keyset is determined at mint time
                 };

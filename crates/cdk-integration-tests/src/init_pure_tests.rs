@@ -20,7 +20,6 @@ use cdk::nuts::{
     MintQuoteBolt11Response, MintRequest, MintResponse, PaymentMethod, RestoreRequest,
     RestoreResponse, SwapRequest, SwapResponse,
 };
-use cdk::types::QuotesSharesResponse;
 use cdk::types::{FeeReserve, QuoteTTL};
 use cdk::util::unix_time;
 use cdk::wallet::{AuthWallet, MintConnector, Wallet, WalletBuilder};
@@ -201,16 +200,6 @@ impl MintConnector for DirectMintConnection {
     ) -> Result<MeltQuoteBolt11Response<String>, Error> {
         // Implementation to be added later
         Err(Error::UnsupportedPaymentMethod)
-    }
-
-    async fn get_quotes_shares(
-        &self,
-        _share_hashes: Vec<String>,
-    ) -> Result<QuotesSharesResponse, Error> {
-        // Stub implementation - will be deleted once locking key lookup is working
-        Ok(QuotesSharesResponse {
-            quote_ids: HashMap::new(),
-        })
     }
 
     async fn post_mint_quote_lookup(

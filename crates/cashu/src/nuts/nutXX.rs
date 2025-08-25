@@ -37,9 +37,6 @@ pub enum Error {
     // TODO fix ehash units to be 2^diff rather than just diff
     #[error("Invalid amount: must be positive and not exceed 256")]
     InvalidAmount,
-    /// No outputs provided
-    #[error("No outputs provided in request")]
-    NoOutputs,
 }
 
 /// Mining share mint quote request
@@ -55,10 +52,8 @@ pub struct MintQuoteMiningShareRequest {
     /// Optional description
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    // TODO make mandatory
-    /// Optional pubkey for NUT-20 signature validation
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub pubkey: Option<PublicKey>,
+    /// Pubkey for NUT-20 signature validation
+    pub pubkey: PublicKey,
     /// Keyset ID for the mint quote
     pub keyset_id: super::Id,
 }
@@ -96,10 +91,8 @@ pub struct MintQuoteMiningShareResponse<Q> {
     pub unit: Option<CurrencyUnit>,
     /// Unix timestamp until which the quote is valid
     pub expiry: Option<u64>,
-    // TODO make mandatory
-    /// Optional pubkey for NUT-20
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub pubkey: Option<PublicKey>,
+    /// Pubkey for NUT-20
+    pub pubkey: PublicKey,
 }
 
 impl<Q: ToString> MintQuoteMiningShareResponse<Q> {
@@ -156,15 +149,6 @@ impl From<MintQuoteMiningShareResponse<Uuid>> for MintQuoteMiningShareResponse<S
             unit: value.unit,
         }
     }
-}
-
-// TODO is this necessary? prob remove this
-/// Mining share mint response
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "swagger", derive(utoipa::ToSchema))]
-pub struct MintMiningShareResponse {
-    /// Blind signatures
-    pub signatures: Vec<BlindSignature>,
 }
 
 /// Quote state for mining shares
