@@ -555,21 +555,6 @@ where
             .await?;
         self.core.http_post(url, auth_token, &request).await
     }
-
-    /// Mining share mint quote
-    #[instrument(skip(self, request), fields(mint_url = %self.mint_url))]
-    async fn post_mint_mining_share_quote(
-        &self,
-        request: cdk_common::nuts::nutXX::MintQuoteMiningShareRequest,
-    ) -> Result<cdk_common::nuts::nutXX::MintQuoteMiningShareResponse<String>, Error> {
-        let url = self
-            .mint_url
-            .join_paths(&["v1", "mint", "quote", "mining-share"])?;
-        let auth_token = self
-            .get_auth_token(Method::Post, RoutePath::MintQuoteMiningShare)
-            .await?;
-        self.core.http_post(url, auth_token, &request).await
-    }
 }
 
 /// Http Client

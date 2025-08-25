@@ -223,15 +223,6 @@ impl MintConnector for DirectMintConnection {
             .await?;
         Ok(cdk::hashpool::PostMintQuoteLookupResponse { quotes })
     }
-
-    async fn post_mint_mining_share_quote(
-        &self,
-        request: cashu::MintQuoteMiningShareRequest,
-    ) -> Result<cashu::MintQuoteMiningShareResponse<String>, Error> {
-        let quote = self.mint.create_mint_mining_share_quote(request).await?;
-        let response: cashu::MintQuoteMiningShareResponse<String> = quote.try_into()?;
-        Ok(response)
-    }
 }
 
 pub fn setup_tracing() {
