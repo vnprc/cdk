@@ -1,90 +1,17 @@
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::collections::HashSet;
 
-use bip39::Mnemonic;
 use bitcoin::hashes::Hash;
-use cdk::cdk_database::MintDatabase;
-use cdk::mint::{MintBuilder, MintMeltLimits};
 use cdk::nuts::SecretKey;
 use cdk::nuts::{CurrencyUnit, MintQuoteBolt11Request, PaymentMethod};
-use cdk::types::{FeeReserve, QuoteTTL};
-use cdk::{Amount, Mint};
-use cdk_fake_wallet::FakeWallet;
+use cdk::Amount;
 use cdk_integration_tests::init_pure_tests::{
-    create_and_start_test_mint, create_test_wallet_for_mint, setup_tracing,
+    create_and_start_test_mint_with_unit, create_test_wallet_for_mint_with_unit, setup_tracing,
 };
-
-async fn create_mining_share_test_mint() -> anyhow::Result<Mint> {
-    let localstore = Arc::new(cdk_sqlite::mint::memory::empty().await?);
-    let mut mint_builder = MintBuilder::new(localstore.clone());
-
-    let fee_reserve = FeeReserve {
-        min_fee_reserve: 1.into(),
-        percent_fee_reserve: 1.0,
-    };
-
-    // Add Bolt11 backend
-    let ln_fake_backend = FakeWallet::new(
-        fee_reserve.clone(),
-        HashMap::default(),
-        HashSet::default(),
-        0,
-        CurrencyUnit::Hash,
-    );
-
-    mint_builder
-        .add_payment_processor(
-            CurrencyUnit::Hash,
-            PaymentMethod::Bolt11,
-            MintMeltLimits::new(1, 10_000),
-            Arc::new(ln_fake_backend),
-        )
-        .await?;
-
-    // Add MiningShare backend (using same fake wallet - mining shares don't need real backend)
-    let mining_fake_backend = FakeWallet::new(
-        fee_reserve.clone(),
-        HashMap::default(),
-        HashSet::default(),
-        0,
-        CurrencyUnit::Hash,
-    );
-
-    mint_builder
-        .add_payment_processor(
-            CurrencyUnit::Hash,
-            PaymentMethod::MiningShare,
-            MintMeltLimits::new(1, 10_000),
-            Arc::new(mining_fake_backend),
-        )
-        .await?;
-
-    let mnemonic = Mnemonic::generate(12)?;
-
-    mint_builder = mint_builder
-        .with_name("mining share test mint".to_string())
-        .with_description("mining share test mint".to_string())
-        .with_urls(vec!["https://aaa".to_string()]);
-
-    let tx_localstore = localstore.clone();
-    let mut tx = tx_localstore.begin_transaction().await?;
-
-    let quote_ttl = QuoteTTL::new(10000, 10000);
-    tx.set_quote_ttl(quote_ttl).await?;
-    tx.commit().await?;
-
-    let mint = mint_builder
-        .build_with_seed(localstore.clone(), &mnemonic.to_seed_normalized(""))
-        .await?;
-
-    mint.start().await?;
-
-    Ok(mint)
-}
 
 #[tokio::test]
 async fn test_hashpool_quote_lookup() -> anyhow::Result<()> {
-    let mint = create_and_start_test_mint().await?;
+    let mint =
+        create_and_start_test_mint_with_unit(CurrencyUnit::Hash, &[PaymentMethod::Bolt11]).await?;
 
     // Generate a test key pair for locking the quote
     let secret_key = SecretKey::generate();
@@ -125,7 +52,8 @@ async fn test_hashpool_quote_lookup() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn test_hashpool_quote_lookup_multiple_keys() -> anyhow::Result<()> {
-    let mint = create_and_start_test_mint().await?;
+    let mint =
+        create_and_start_test_mint_with_unit(CurrencyUnit::Hash, &[PaymentMethod::Bolt11]).await?;
 
     // Generate multiple test key pairs
     let secret_key1 = SecretKey::generate();
@@ -184,7 +112,8 @@ async fn test_hashpool_quote_lookup_multiple_keys() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn test_hashpool_quote_lookup_empty_result() -> anyhow::Result<()> {
-    let mint = create_and_start_test_mint().await?;
+    let mint =
+        create_and_start_test_mint_with_unit(CurrencyUnit::Hash, &[PaymentMethod::Bolt11]).await?;
 
     // Generate a key that has no associated quotes
     let secret_key = SecretKey::generate();
@@ -203,8 +132,9 @@ async fn test_hashpool_quote_lookup_empty_result() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn test_wallet_hashpool_quote_lookup() -> anyhow::Result<()> {
-    let mint = create_and_start_test_mint().await?;
-    let wallet = create_test_wallet_for_mint(mint.clone()).await?;
+    let mint =
+        create_and_start_test_mint_with_unit(CurrencyUnit::Hash, &[PaymentMethod::Bolt11]).await?;
+    let wallet = create_test_wallet_for_mint_with_unit(mint.clone(), CurrencyUnit::Hash).await?;
 
     // Initialize the wallet by fetching mint info
     wallet.fetch_mint_info().await?;
@@ -248,8 +178,9 @@ async fn test_wallet_hashpool_quote_lookup() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn test_wallet_hashpool_multiple_quote_lookup() -> anyhow::Result<()> {
-    let mint = create_and_start_test_mint().await?;
-    let wallet = create_test_wallet_for_mint(mint.clone()).await?;
+    let mint =
+        create_and_start_test_mint_with_unit(CurrencyUnit::Hash, &[PaymentMethod::Bolt11]).await?;
+    let wallet = create_test_wallet_for_mint_with_unit(mint.clone(), CurrencyUnit::Hash).await?;
 
     // Initialize the wallet by fetching mint info
     wallet.fetch_mint_info().await?;
@@ -303,28 +234,17 @@ async fn test_wallet_hashpool_multiple_quote_lookup() -> anyhow::Result<()> {
 
 #[tokio::test]
 async fn test_mint_tokens_for_pubkey() -> anyhow::Result<()> {
-    // TODO: This test is currently failing with "Unknown Keyset" error during wallet.get_mint_keysets().await
-    // The issue is that the mint configured with CurrencyUnit::Hash payment processors isn't properly
-    // generating keysets for the Hash unit. This needs investigation into:
-    // 1. Mint keyset generation for Hash currency unit
-    // 2. Wallet keyset lookup/validation for Hash unit
-    // 3. Integration between mining share functionality and Hash unit
-    // The core hashpool quote lookup functionality works correctly - this is specifically a mining share + Hash unit issue.
-
     setup_tracing();
 
     // Create a custom mint with mining share support
-    let mint = create_mining_share_test_mint().await?;
-    let wallet = create_test_wallet_for_mint(mint.clone()).await?;
+    let mint =
+        create_and_start_test_mint_with_unit(CurrencyUnit::Hash, &[PaymentMethod::MiningShare])
+            .await?;
+    let wallet = create_test_wallet_for_mint_with_unit(mint.clone(), CurrencyUnit::Hash).await?;
 
     // Initialize wallet and keysets
-    println!("Fetching mint info...");
     wallet.fetch_mint_info().await?;
-
-    // Load mint keysets to ensure wallet has keyset information
-    println!("Getting mint keysets...");
-    let _keysets = wallet.get_mint_keysets().await?;
-    println!("Successfully got keysets");
+    wallet.load_mint_keysets().await?;
 
     // Generate a keypair for locking and signing
     use cdk::nuts::SecretKey;
@@ -333,14 +253,12 @@ async fn test_mint_tokens_for_pubkey() -> anyhow::Result<()> {
 
     // Get an active keyset for Hash unit
     let keysets = mint.keysets();
-    println!("Available keysets: {:?}", keysets.keysets);
     let keyset_id = keysets
         .keysets
         .iter()
         .find(|ks| ks.unit == CurrencyUnit::Hash && ks.active)
         .map(|ks| ks.id)
         .expect("No active keyset found for Hash unit");
-    println!("Using keyset_id: {:?}", keyset_id);
 
     // Create mining share quote on the mint with locking pubkey
     let quote_request = cashu::MintQuoteMiningShareRequest {
@@ -353,10 +271,7 @@ async fn test_mint_tokens_for_pubkey() -> anyhow::Result<()> {
     };
 
     // Create the quote on the mint
-    let quote = mint.create_mint_mining_share_quote(quote_request).await?;
-
-    // Debug: Print the quote to see if keyset_id is stored properly
-    println!("Created quote: {:?}", quote);
+    let _quote = mint.create_mint_mining_share_quote(quote_request).await?;
 
     // Now try to mint tokens for this pubkey using the wallet
     let proofs = wallet

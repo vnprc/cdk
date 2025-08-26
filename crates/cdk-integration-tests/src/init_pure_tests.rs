@@ -230,6 +230,13 @@ pub fn setup_tracing() {
 }
 
 pub async fn create_and_start_test_mint() -> Result<Mint> {
+    create_and_start_test_mint_with_unit(CurrencyUnit::Sat, &[PaymentMethod::Bolt11]).await
+}
+
+pub async fn create_and_start_test_mint_with_unit(
+    unit: CurrencyUnit,
+    payment_methods: &[PaymentMethod],
+) -> Result<Mint> {
     // Read environment variable to determine database type
     let db_type = env::var("CDK_TEST_DB_TYPE").expect("Database type set");
 
@@ -254,22 +261,24 @@ pub async fn create_and_start_test_mint() -> Result<Mint> {
         percent_fee_reserve: 1.0,
     };
 
-    let ln_fake_backend = FakeWallet::new(
-        fee_reserve.clone(),
-        HashMap::default(),
-        HashSet::default(),
-        2,
-        CurrencyUnit::Sat,
-    );
+    for payment_method in payment_methods {
+        let fake_backend = FakeWallet::new(
+            fee_reserve.clone(),
+            HashMap::default(),
+            HashSet::default(),
+            0,
+            unit.clone(),
+        );
 
-    mint_builder
-        .add_payment_processor(
-            CurrencyUnit::Sat,
-            PaymentMethod::Bolt11,
-            MintMeltLimits::new(1, 10_000),
-            Arc::new(ln_fake_backend),
-        )
-        .await?;
+        mint_builder
+            .add_payment_processor(
+                unit.clone(),
+                payment_method.clone(),
+                MintMeltLimits::new(1, 10_000),
+                Arc::new(fake_backend),
+            )
+            .await?;
+    }
 
     let mnemonic = Mnemonic::generate(12)?;
 
@@ -295,6 +304,13 @@ pub async fn create_and_start_test_mint() -> Result<Mint> {
 }
 
 pub async fn create_test_wallet_for_mint(mint: Mint) -> Result<Wallet> {
+    create_test_wallet_for_mint_with_unit(mint, CurrencyUnit::Sat).await
+}
+
+pub async fn create_test_wallet_for_mint_with_unit(
+    mint: Mint,
+    unit: CurrencyUnit,
+) -> Result<Wallet> {
     let connector = DirectMintConnection::new(mint.clone());
 
     let mint_info = mint.mint_info().await?;
@@ -306,7 +322,6 @@ pub async fn create_test_wallet_for_mint(mint: Mint) -> Result<Wallet> {
         .ok_or(anyhow!("Test mint has empty URLs list"))?;
 
     let seed = Mnemonic::generate(12)?.to_seed_normalized("");
-    let unit = CurrencyUnit::Sat;
 
     // Read environment variable to determine database type
     let db_type = env::var("CDK_TEST_DB_TYPE").expect("Database type set");
