@@ -97,7 +97,7 @@ impl OnNewSubscription for OnSubscription {
                                         Err(_) => None,
                                     },
                                     PaymentMethod::Custom(_) => None,
-                                    // TODO handle this better idk
+                                    // TODO implement websocket support
                                     PaymentMethod::MiningShare => None,
                                 })
                             })

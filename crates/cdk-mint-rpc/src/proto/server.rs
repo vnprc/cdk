@@ -689,7 +689,7 @@ impl CdkMint for MintRPCServer {
                     mint_quote.payment_method.clone(),    // method
                     0,                                    // created_at
                     vec![],                               // payment_ids
-                    vec![],                               // issuance
+                    vec![],                               // issuances
                     None, // keyset_id (None for non-mining-share quotes)
                 );
 

@@ -23,7 +23,7 @@ impl Mint {
             return Ok(());
         }
 
-        // TODO refactor code structure to remove this function from mining share code path
+        // TODO move this function to mint/mod.rs
         // Mining shares are verified during quote creation and don't need Lightning verification
         if quote.payment_method == PaymentMethod::MiningShare {
             return Ok(());

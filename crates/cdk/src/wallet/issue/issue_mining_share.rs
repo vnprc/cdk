@@ -145,7 +145,6 @@ impl Wallet {
         let mut mint_request = cdk_common::nuts::MintRequest {
             quote: quote_id.to_string(),
             outputs: premint_secrets.blinded_messages().to_vec(),
-            // TODO why hard code to None? fix this
             signature: None,
         };
 
