@@ -660,14 +660,12 @@ ON CONFLICT(id) DO UPDATE SET
         // Recompute ID for verification
         keyset.verify_id()?;
 
-        // TODO upstream "on conflict do nothing" change
         query(
             r#"
             INSERT INTO key
             (id, keys, keyset_u32)
             VALUES
             (:id, :keys, :keyset_u32)
-            ON CONFLICT(id) DO NOTHING
         "#,
         )?
         .bind("id", keyset.id.to_string())

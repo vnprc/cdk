@@ -96,7 +96,7 @@ impl Wallet {
             .await?
         {
             Some(keysets_info) => Ok(keysets_info),
-            None => Err(Error::UnknownKeySet),
+            None => Ok(vec![]),
         }
     }
 
