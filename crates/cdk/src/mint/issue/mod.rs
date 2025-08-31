@@ -643,6 +643,14 @@ impl Mint {
             payment_id: create_invoice_response.request_lookup_id.to_string(),
         };
 
+        // Get the active keyset for this unit
+        // TODO: validate keyset against the block height in the currency unit
+        let active_keysets = self.get_active_keysets();
+        let keyset_id = active_keysets
+            .get(&unit)
+            .ok_or(Error::NoActiveKeyset)?
+            .clone();
+
         let quote = MintQuote::new(
             None,
             create_invoice_response.request.to_string(),
@@ -656,8 +664,8 @@ impl Mint {
             payment_method.clone(),
             unix_time(),
             vec![payment],
-            vec![],                             // issuance
-            Some(mint_quote_request.keyset_id), // keyset_id for mining shares
+            vec![],          // issuance
+            Some(keyset_id), // keyset_id determined by mint
         );
 
         tracing::debug!(

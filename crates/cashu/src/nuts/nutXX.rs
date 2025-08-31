@@ -54,8 +54,6 @@ pub struct MintQuoteMiningShareRequest {
     pub description: Option<String>,
     /// Pubkey for NUT-20 signature validation
     pub pubkey: PublicKey,
-    /// Keyset ID for the mint quote
-    pub keyset_id: super::Id,
 }
 
 impl MintQuoteMiningShareRequest {

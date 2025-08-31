@@ -253,7 +253,7 @@ async fn test_mint_tokens_for_pubkey() -> anyhow::Result<()> {
 
     // Get an active keyset for Hash unit
     let keysets = mint.keysets();
-    let keyset_id = keysets
+    let _keyset_id = keysets
         .keysets
         .iter()
         .find(|ks| ks.unit == CurrencyUnit::Hash && ks.active)
@@ -267,7 +267,6 @@ async fn test_mint_tokens_for_pubkey() -> anyhow::Result<()> {
         header_hash: bitcoin::hashes::sha256::Hash::hash(&[1; 32]),
         description: None,
         pubkey,
-        keyset_id,
     };
 
     // Create the quote on the mint
