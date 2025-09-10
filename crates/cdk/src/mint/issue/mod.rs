@@ -783,7 +783,7 @@ impl Mint {
             _ => return Err(Error::UnsupportedPaymentMethod),
         };
 
-        // If the there is a public key provoided in mint quote request
+        // If there is a public key provided in mint quote request
         // verify the signature is provided for the mint request
         if let Some(pubkey) = mint_quote.pubkey {
             mint_request.verify_signature(pubkey)?;

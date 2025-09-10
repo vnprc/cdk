@@ -23,11 +23,109 @@ use crate::nuts::nut22::MintAuthRequest;
 use crate::nuts::{
     AuthToken, CheckStateRequest, CheckStateResponse, Id, KeySet, KeysResponse, KeysetResponse,
     MeltQuoteBolt11Request, MeltQuoteBolt11Response, MeltRequest, MintInfo, MintQuoteBolt11Request,
-    MintQuoteBolt11Response, MintRequest, MintResponse, PaymentMethod, RestoreRequest,
-    RestoreResponse, SwapRequest, SwapResponse,
+    MintQuoteBolt11Response, MintQuoteMiningShareRequest, MintQuoteMiningShareResponse,
+    MintRequest, MintResponse, PaymentMethod, RestoreRequest, RestoreResponse, SwapRequest,
+    SwapResponse,
 };
 #[cfg(feature = "auth")]
 use crate::wallet::auth::{AuthMintConnector, AuthWallet};
+
+#[derive(Debug, Clone)]
+struct HttpClientCore {
+    inner: Client,
+}
+
+impl HttpClientCore {
+    fn new() -> Self {
+        #[cfg(not(target_arch = "wasm32"))]
+        if rustls::crypto::CryptoProvider::get_default().is_none() {
+            let _ = rustls::crypto::ring::default_provider().install_default();
+        }
+
+        Self {
+            inner: Client::new(),
+        }
+    }
+
+    fn client(&self) -> &Client {
+        &self.inner
+    }
+
+    async fn http_get<U: IntoUrl + Send, R: DeserializeOwned>(
+        &self,
+        url: U,
+        auth: Option<AuthToken>,
+    ) -> Result<R, Error> {
+        let mut request = self.client().get(url);
+
+        if let Some(auth) = auth {
+            request = request.header(auth.header_key(), auth.to_string());
+        }
+
+        let response = request
+            .send()
+            .await
+            .map_err(|e| {
+                Error::HttpError(
+                    e.status().map(|status_code| status_code.as_u16()),
+                    e.to_string(),
+                )
+            })?
+            .text()
+            .await
+            .map_err(|e| {
+                Error::HttpError(
+                    e.status().map(|status_code| status_code.as_u16()),
+                    e.to_string(),
+                )
+            })?;
+
+        serde_json::from_str::<R>(&response).map_err(|err| {
+            tracing::warn!("Http Response error: {}", err);
+            tracing::warn!("Raw HTTP response body: {}", response);
+            match ErrorResponse::from_json(&response) {
+                Ok(ok) => <ErrorResponse as Into<Error>>::into(ok),
+                Err(err) => err.into(),
+            }
+        })
+    }
+
+    async fn http_post<U: IntoUrl + Send, P: Serialize + ?Sized, R: DeserializeOwned>(
+        &self,
+        url: U,
+        auth_token: Option<AuthToken>,
+        payload: &P,
+    ) -> Result<R, Error> {
+        let mut request = self.client().post(url).json(&payload);
+
+        if let Some(auth) = auth_token {
+            request = request.header(auth.header_key(), auth.to_string());
+        }
+
+        let response = request.send().await.map_err(|e| {
+            Error::HttpError(
+                e.status().map(|status_code| status_code.as_u16()),
+                e.to_string(),
+            )
+        })?;
+
+        let response = response.text().await.map_err(|e| {
+            Error::HttpError(
+                e.status().map(|status_code| status_code.as_u16()),
+                e.to_string(),
+            )
+        })?;
+
+        serde_json::from_str::<R>(&response).map_err(|err| {
+            tracing::warn!("Http Response error: {}", err);
+            tracing::warn!("Raw HTTP response body: {}", response);
+            match ErrorResponse::from_json(&response) {
+                Ok(ok) => <ErrorResponse as Into<Error>>::into(ok),
+                Err(err) => err.into(),
+            }
+        })
+    }
+}
 
 type Cache = (u64, HashSet<(nut19::Method, nut19::Path)>);
 
@@ -558,6 +656,67 @@ where
         let auth_token = self
             .get_auth_token(Method::Post, RoutePath::MintQuoteLookup)
             .await?;
+        self.core.http_post(url, auth_token, &request).await
+    }
+
+    /// Mint Quote for Mining Share [NUT-XX]
+    #[instrument(skip(self), fields(mint_url = %self.mint_url))]
+    async fn post_mint_quote_mining_share(
+        &self,
+        request: MintQuoteMiningShareRequest,
+    ) -> Result<MintQuoteMiningShareResponse<String>, Error> {
+        let url = self
+            .mint_url
+            .join_paths(&["v1", "mint", "quote", "mining_share"])?;
+
+        #[cfg(feature = "auth")]
+        let auth_token = self
+            .get_auth_token(Method::Post, RoutePath::MintQuoteBolt11) // Use Bolt11 auth for now
+            .await?;
+
+        #[cfg(not(feature = "auth"))]
+        let auth_token = None;
+
+        self.core.http_post(url, auth_token, &request).await
+    }
+
+    /// Mint Quote status for Mining Share [NUT-XX]
+    #[instrument(skip(self), fields(mint_url = %self.mint_url))]
+    async fn get_mint_quote_status_mining_share(
+        &self,
+        quote_id: &str,
+    ) -> Result<MintQuoteMiningShareResponse<String>, Error> {
+        let url = self
+            .mint_url
+            .join_paths(&["v1", "mint", "quote", "mining_share", quote_id])?;
+
+        #[cfg(feature = "auth")]
+        let auth_token = self
+            .get_auth_token(Method::Get, RoutePath::MintQuoteBolt11) // Use Bolt11 auth for now
+            .await?;
+
+        #[cfg(not(feature = "auth"))]
+        let auth_token = None;
+
+        self.core.http_get(url, auth_token).await
+    }
+
+    /// Mint Tokens for Mining Share [NUT-XX]
+    #[instrument(skip(self), fields(mint_url = %self.mint_url))]
+    async fn post_mint_mining_share(
+        &self,
+        request: MintRequest<String>,
+    ) -> Result<MintResponse, Error> {
+        let url = self.mint_url.join_paths(&["v1", "mint", "mining_share"])?;
+
+        #[cfg(feature = "auth")]
+        let auth_token = self
+            .get_auth_token(Method::Post, RoutePath::MintBolt11) // Use Bolt11 auth for now
+            .await?;
+
+        #[cfg(not(feature = "auth"))]
+        let auth_token = None;
+
         self.core.http_post(url, auth_token, &request).await
     }
 }

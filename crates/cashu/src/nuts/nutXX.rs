@@ -93,6 +93,8 @@ pub struct MintQuoteMiningShareResponse<Q> {
     pub expiry: Option<u64>,
     /// Pubkey for NUT-20
     pub pubkey: PublicKey,
+    /// Keyset ID for this quote
+    pub keyset_id: crate::nuts::Id,
 }
 
 impl<Q: ToString> MintQuoteMiningShareResponse<Q> {
@@ -106,6 +108,7 @@ impl<Q: ToString> MintQuoteMiningShareResponse<Q> {
             state: self.state,
             expiry: self.expiry,
             pubkey: self.pubkey,
+            keyset_id: self.keyset_id,
         }
     }
 
@@ -149,6 +152,7 @@ impl From<MintQuoteMiningShareResponse<Uuid>> for MintQuoteMiningShareResponse<S
             state: value.state,
             expiry: value.expiry,
             pubkey: value.pubkey,
+            keyset_id: value.keyset_id,
         }
     }
 }

@@ -213,6 +213,30 @@ impl MintConnector for DirectMintConnection {
             .await?;
         Ok(cdk::hashpool::PostMintQuoteLookupResponse { quotes })
     }
+
+    /// Mint Quote for Mining Share [NUT-XX] (Not implemented in tests)
+    async fn post_mint_quote_mining_share(
+        &self,
+        _request: cdk::nuts::MintQuoteMiningShareRequest,
+    ) -> Result<cdk::nuts::MintQuoteMiningShareResponse<String>, Error> {
+        unimplemented!("Mining share quotes not supported in test client")
+    }
+
+    /// Mint Quote status for Mining Share [NUT-XX] (Not implemented in tests)
+    async fn get_mint_quote_status_mining_share(
+        &self,
+        _quote_id: &str,
+    ) -> Result<cdk::nuts::MintQuoteMiningShareResponse<String>, Error> {
+        unimplemented!("Mining share quote status not supported in test client")
+    }
+
+    /// Mint Tokens for Mining Share [NUT-XX] (Not implemented in tests)
+    async fn post_mint_mining_share(
+        &self,
+        _request: cdk::nuts::MintRequest<String>,
+    ) -> Result<cdk::nuts::MintResponse, Error> {
+        unimplemented!("Mining share minting not supported in test client")
+    }
 }
 
 pub fn setup_tracing() {

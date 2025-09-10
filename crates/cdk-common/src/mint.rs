@@ -400,6 +400,9 @@ impl TryFrom<crate::mint::MintQuote> for MintQuoteMiningShareResponse<QuoteId> {
         let pubkey = mint_quote
             .pubkey
             .ok_or(crate::Error::InvalidPaymentRequest)?;
+        let keyset_id = mint_quote
+            .keyset_id
+            .ok_or(crate::Error::InvalidPaymentRequest)?;
         let state = mint_quote.state().into();
         Ok(MintQuoteMiningShareResponse {
             quote: mint_quote.id,
@@ -409,6 +412,7 @@ impl TryFrom<crate::mint::MintQuote> for MintQuoteMiningShareResponse<QuoteId> {
             state,
             expiry: Some(mint_quote.expiry),
             pubkey,
+            keyset_id,
         })
     }
 }

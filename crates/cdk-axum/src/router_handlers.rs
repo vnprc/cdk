@@ -66,6 +66,7 @@ macro_rules! post_cache_wrapper {
 
 post_cache_wrapper!(post_swap, SwapRequest, SwapResponse);
 post_cache_wrapper!(post_mint_bolt11, MintRequest<QuoteId>, MintResponse);
+post_cache_wrapper!(post_mint_mining_share, MintRequest<String>, MintResponse);
 post_cache_wrapper!(
     post_melt_bolt11,
     MeltRequest<QuoteId>,
@@ -301,6 +302,61 @@ pub(crate) async fn post_mint_bolt11(
         .await
         .map_err(|err| {
             tracing::error!("Could not process mint: {}", err);
+            into_response(err)
+        })?;
+
+    Ok(Json(res))
+}
+
+/// Mint tokens using a mining share quote.
+///
+/// Requests the minting of tokens belonging to a paid mining share quote.
+///
+/// Call this endpoint after `POST /v1/mint/quote/mining_share`.
+#[cfg_attr(feature = "swagger", utoipa::path(
+    post,
+    context_path = "/v1",
+    path = "/mint/mining_share",
+    request_body(content = MintRequest<String>, description = "Request params", content_type = "application/json"),
+    responses(
+        (status = 200, description = "Successful response", body = MintResponse, content_type = "application/json"),
+        (status = 500, description = "Server error", body = ErrorResponse, content_type = "application/json")
+    )
+))]
+#[instrument(skip_all, fields(quote_id = ?payload.quote))]
+pub(crate) async fn post_mint_mining_share(
+    #[cfg(feature = "auth")] auth: AuthHeader,
+    State(state): State<MintState>,
+    Json(payload): Json<MintRequest<String>>,
+) -> Result<Json<MintResponse>, Response> {
+    #[cfg(feature = "auth")]
+    {
+        state
+            .mint
+            .verify_auth(
+                auth.into(),
+                &ProtectedEndpoint::new(Method::Post, RoutePath::MintBolt11), // Use Bolt11 auth for now
+            )
+            .await
+            .map_err(into_response)?;
+    }
+
+    // Convert MintRequest<String> to MintRequest<Uuid>
+    let payload_uuid = MintRequest {
+        quote: payload.quote.parse::<uuid::Uuid>().map_err(|err| {
+            tracing::error!("Invalid quote UUID '{}': {}", payload.quote, err);
+            (StatusCode::BAD_REQUEST, "Invalid quote ID format").into_response()
+        })?,
+        outputs: payload.outputs,
+        signature: payload.signature,
+    };
+
+    let res = state
+        .mint
+        .process_mint_request(payload_uuid)
+        .await
+        .map_err(|err| {
+            tracing::error!("Could not process mining share mint: {}", err);
             into_response(err)
         })?;
 
