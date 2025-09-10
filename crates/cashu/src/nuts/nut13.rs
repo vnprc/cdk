@@ -3,6 +3,7 @@
 //! <https://github.com/cashubtc/nuts/blob/main/13.md>
 
 use bitcoin::bip32::{ChildNumber, DerivationPath, Xpriv};
+use bitcoin::key::FromSliceError;
 use bitcoin::secp256k1::hashes::{hmac, sha256, Hash, HashEngine, HmacEngine};
 use bitcoin::{secp256k1, Network};
 use thiserror::Error;
@@ -37,7 +38,7 @@ pub enum Error {
     Bip32(#[from] bitcoin::bip32::Error),
     /// HMAC Error
     #[error(transparent)]
-    Hmac(#[from] bitcoin::secp256k1::hashes::FromSliceError),
+    Hmac(#[from] FromSliceError),
     /// SecretKey Error
     #[error(transparent)]
     SecpError(#[from] bitcoin::secp256k1::Error),
