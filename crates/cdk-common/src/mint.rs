@@ -400,11 +400,13 @@ impl TryFrom<crate::mint::MintQuote> for MintQuoteMiningShareResponse<QuoteId> {
         let pubkey = mint_quote
             .pubkey
             .ok_or(crate::Error::InvalidPaymentRequest)?;
+        let state = mint_quote.state().into();
         Ok(MintQuoteMiningShareResponse {
             quote: mint_quote.id,
             request: mint_quote.request,
             amount: mint_quote.amount,
             unit: Some(mint_quote.unit),
+            state,
             expiry: Some(mint_quote.expiry),
             pubkey,
         })

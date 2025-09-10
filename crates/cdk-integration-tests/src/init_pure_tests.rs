@@ -80,6 +80,7 @@ impl MintConnector for DirectMintConnection {
     async fn get_mint_quote_status(
         &self,
         quote_id: &str,
+        _payment_method: cdk::nuts::PaymentMethod,
     ) -> Result<MintQuoteBolt11Response<String>, Error> {
         self.mint
             .check_mint_quote(&QuoteId::from_str(quote_id)?)

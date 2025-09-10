@@ -124,7 +124,10 @@ impl Wallet {
         &self,
         quote_id: &str,
     ) -> Result<MintQuoteBolt11Response<String>, Error> {
-        let response = self.client.get_mint_quote_status(quote_id).await?;
+        let response = self
+            .client
+            .get_mint_quote_status(quote_id, crate::nuts::PaymentMethod::Bolt11)
+            .await?;
 
         match self.localstore.get_mint_quote(quote_id).await? {
             Some(quote) => {

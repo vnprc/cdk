@@ -64,7 +64,10 @@ async fn test_quote_status_without_auth() {
     // Test mint quote status
     {
         let quote_res = client
-            .get_mint_quote_status("123e4567-e89b-12d3-a456-426614174000")
+            .get_mint_quote_status(
+                "123e4567-e89b-12d3-a456-426614174000",
+                cdk::nuts::PaymentMethod::Bolt11,
+            )
             .await;
 
         assert!(
@@ -126,7 +129,10 @@ async fn test_mint_without_auth() {
 
     {
         let mint_res = client
-            .get_mint_quote_status("123e4567-e89b-12d3-a456-426614174000")
+            .get_mint_quote_status(
+                "123e4567-e89b-12d3-a456-426614174000",
+                cdk::nuts::PaymentMethod::Bolt11,
+            )
             .await;
 
         assert!(

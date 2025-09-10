@@ -8,6 +8,7 @@ use cdk::error::{ErrorCode, ErrorResponse};
 use cdk::mint::QuoteId;
 #[cfg(feature = "auth")]
 use cdk::nuts::nut21::{Method, ProtectedEndpoint, RoutePath};
+use cdk::nuts::nutXX::MintQuoteMiningShareResponse;
 use cdk::nuts::{
     CheckStateRequest, CheckStateResponse, Id, KeysResponse, KeysetResponse,
     MeltQuoteBolt11Request, MeltQuoteBolt11Response, MeltRequest, MintInfo, MintQuoteBolt11Request,
@@ -216,6 +217,40 @@ pub(crate) async fn get_check_mint_bolt11_quote(
             into_response(err)
         })?;
 
+    Ok(Json(quote.try_into().map_err(into_response)?))
+}
+
+/// Get mint quote mining share
+///
+/// Get mint quote state for mining share quotes.
+#[instrument(skip_all, fields(quote_id = ?quote_id))]
+pub(crate) async fn get_check_mint_quote_mining_share(
+    #[cfg(feature = "auth")] auth: AuthHeader,
+    State(state): State<MintState>,
+    Path(quote_id): Path<Uuid>,
+) -> Result<Json<MintQuoteMiningShareResponse<Uuid>>, Response> {
+    #[cfg(feature = "auth")]
+    {
+        state
+            .mint
+            .verify_auth(
+                auth.into(),
+                &ProtectedEndpoint::new(Method::Get, RoutePath::MintQuoteBolt11), // Use Bolt11 auth for now
+            )
+            .await
+            .map_err(into_response)?;
+    }
+
+    let quote = state
+        .mint
+        .check_mint_quote(&quote_id)
+        .await
+        .map_err(|err| {
+            tracing::error!("Could not check mint quote {}: {}", quote_id, err);
+            into_response(err)
+        })?;
+
+    // Convert to MintQuoteMiningShareResponse format which now includes the state field
     Ok(Json(quote.try_into().map_err(into_response)?))
 }
 

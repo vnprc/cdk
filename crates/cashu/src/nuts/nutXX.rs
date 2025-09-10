@@ -87,6 +87,8 @@ pub struct MintQuoteMiningShareResponse<Q> {
     pub amount: Option<Amount>,
     /// Currency unit
     pub unit: Option<CurrencyUnit>,
+    /// Quote State
+    pub state: QuoteState,
     /// Unix timestamp until which the quote is valid
     pub expiry: Option<u64>,
     /// Pubkey for NUT-20
@@ -99,10 +101,11 @@ impl<Q: ToString> MintQuoteMiningShareResponse<Q> {
         MintQuoteMiningShareResponse {
             quote: self.quote.to_string(),
             request: self.request.clone(),
-            expiry: self.expiry,
-            pubkey: self.pubkey,
             amount: self.amount,
             unit: self.unit.clone(),
+            state: self.state,
+            expiry: self.expiry,
+            pubkey: self.pubkey,
         }
     }
 
@@ -141,10 +144,11 @@ impl From<MintQuoteMiningShareResponse<Uuid>> for MintQuoteMiningShareResponse<S
         Self {
             quote: value.quote.to_string(),
             request: value.request,
-            expiry: value.expiry,
-            pubkey: value.pubkey,
             amount: value.amount,
             unit: value.unit,
+            state: value.state,
+            expiry: value.expiry,
+            pubkey: value.pubkey,
         }
     }
 }
@@ -169,6 +173,26 @@ impl fmt::Display for QuoteState {
             Self::Paid => write!(f, "PAID"),
             Self::Pending => write!(f, "PENDING"),
             Self::Issued => write!(f, "ISSUED"),
+        }
+    }
+}
+
+impl From<super::nut23::QuoteState> for QuoteState {
+    fn from(state: super::nut23::QuoteState) -> Self {
+        match state {
+            super::nut23::QuoteState::Paid => Self::Paid,
+            super::nut23::QuoteState::Unpaid => Self::Pending, // Map Unpaid to Pending for mining shares
+            super::nut23::QuoteState::Issued => Self::Issued,
+        }
+    }
+}
+
+impl From<QuoteState> for super::nut23::QuoteState {
+    fn from(state: QuoteState) -> Self {
+        match state {
+            QuoteState::Paid => Self::Paid,
+            QuoteState::Pending => Self::Unpaid, // Map Pending back to Unpaid
+            QuoteState::Issued => Self::Issued,
         }
     }
 }

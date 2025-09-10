@@ -120,7 +120,7 @@ pub async fn http_main<S: IntoIterator<Item = SubId>>(
                         },
                         UrlType::Mint(id) => {
 
-                            let response = http_client.get_mint_quote_status(id).await;
+                            let response = http_client.get_mint_quote_status(id, crate::nuts::PaymentMethod::Bolt11).await;
                             if let Ok(response) = response {
                                 if *last_state == AnyState::MintQuoteState(response.state) {
                                     continue;

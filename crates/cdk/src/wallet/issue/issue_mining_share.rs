@@ -8,7 +8,7 @@ use tracing::instrument;
 
 use cdk_common::amount::SplitTarget;
 use cdk_common::common::ProofInfo;
-use cdk_common::nuts::State;
+use cdk_common::nuts::{MintQuoteBolt11Response, State};
 use cdk_common::Amount;
 
 use crate::wallet::Error;
@@ -344,5 +344,49 @@ impl Wallet {
         }
 
         Ok(all_proofs)
+    }
+
+    /// Check mining share mint quote status
+    #[instrument(skip(self, quote_id))]
+    pub async fn mint_quote_state_mining_share(
+        &self,
+        quote_id: &str,
+    ) -> Result<MintQuoteBolt11Response<String>, Error> {
+        let response = self
+            .client
+            .get_mint_quote_status(quote_id, crate::nuts::PaymentMethod::MiningShare)
+            .await?;
+
+        match self.localstore.get_mint_quote(quote_id).await? {
+            Some(quote) => {
+                // Update existing local quote with current state
+                let mut quote = quote;
+                quote.state = response.state;
+                self.localstore.add_mint_quote(quote).await?;
+            }
+            None => {
+                // Create new local quote record from the API response
+                tracing::info!("Creating local record for mining share quote {}", quote_id);
+
+                let wallet_quote = cdk_common::wallet::MintQuote {
+                    id: quote_id.to_string(),
+                    mint_url: self.mint_url.clone(),
+                    payment_method: cdk_common::PaymentMethod::MiningShare,
+                    amount: response.amount,
+                    unit: response.unit.clone().unwrap_or(self.unit.clone()),
+                    request: response.request.clone(),
+                    state: response.state.into(),
+                    expiry: response.expiry.unwrap_or(0),
+                    secret_key: None,
+                    amount_issued: Amount::ZERO,
+                    amount_paid: response.amount.unwrap_or(Amount::ZERO),
+                    keyset_id: None, // TODO retrieve this from the mint quote creation response
+                };
+
+                self.localstore.add_mint_quote(wallet_quote).await?;
+            }
+        }
+
+        Ok(response)
     }
 }

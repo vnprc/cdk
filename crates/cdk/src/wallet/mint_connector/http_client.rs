@@ -23,8 +23,8 @@ use crate::nuts::nut22::MintAuthRequest;
 use crate::nuts::{
     AuthToken, CheckStateRequest, CheckStateResponse, Id, KeySet, KeysResponse, KeysetResponse,
     MeltQuoteBolt11Request, MeltQuoteBolt11Response, MeltRequest, MintInfo, MintQuoteBolt11Request,
-    MintQuoteBolt11Response, MintRequest, MintResponse, RestoreRequest, RestoreResponse,
-    SwapRequest, SwapResponse,
+    MintQuoteBolt11Response, MintRequest, MintResponse, PaymentMethod, RestoreRequest,
+    RestoreResponse, SwapRequest, SwapResponse,
 };
 #[cfg(feature = "auth")]
 use crate::wallet::auth::{AuthMintConnector, AuthWallet};
@@ -245,18 +245,40 @@ where
     async fn get_mint_quote_status(
         &self,
         quote_id: &str,
+        payment_method: PaymentMethod,
     ) -> Result<MintQuoteBolt11Response<String>, Error> {
-        let url = self
-            .mint_url
-            .join_paths(&["v1", "mint", "quote", "bolt11", quote_id])?;
+        let path_segments = match &payment_method {
+            PaymentMethod::Bolt11 => vec!["v1", "mint", "quote", "bolt11", quote_id],
+            PaymentMethod::MiningShare => vec!["v1", "mint", "quote", "mining_share", quote_id],
+            PaymentMethod::Bolt12 => vec!["v1", "mint", "quote", "bolt12", quote_id],
+            PaymentMethod::Custom(method) => vec!["v1", "mint", "quote", method.as_str(), quote_id],
+        };
+
+        let url = self.mint_url.join_paths(&path_segments)?;
 
         #[cfg(feature = "auth")]
-        let auth_token = self
-            .get_auth_token(Method::Get, RoutePath::MintQuoteBolt11)
-            .await?;
+        let auth_token = match payment_method {
+            PaymentMethod::Bolt11 => {
+                self.get_auth_token(Method::Get, RoutePath::MintQuoteBolt11)
+                    .await?
+            }
+            PaymentMethod::Bolt12 => {
+                self.get_auth_token(Method::Get, RoutePath::MintQuoteBolt12)
+                    .await?
+            }
+            PaymentMethod::MiningShare => {
+                self.get_auth_token(Method::Get, RoutePath::MintQuoteBolt11) // Use Bolt11 auth for now
+                    .await?
+            }
+            PaymentMethod::Custom(_) => {
+                self.get_auth_token(Method::Get, RoutePath::MintQuoteBolt11) // Fallback to Bolt11 auth
+                    .await?
+            }
+        };
 
         #[cfg(not(feature = "auth"))]
         let auth_token = None;
+
         self.transport.http_get(url, auth_token).await
     }
 
