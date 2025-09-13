@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use cdk_common::{MeltQuoteBolt12Request, MintQuoteBolt12Request, MintQuoteBolt12Response};
 #[cfg(feature = "auth")]
 use cdk_common::{Method, ProtectedEndpoint, RoutePath};
+use reqwest::{Client, IntoUrl};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 #[cfg(feature = "auth")]
@@ -16,6 +17,7 @@ use web_time::{Duration, Instant};
 
 use super::transport::Transport;
 use super::{Error, MintConnector};
+use crate::error::ErrorResponse;
 use crate::mint_url::MintUrl;
 use crate::nuts::nut19;
 #[cfg(feature = "auth")]
@@ -662,7 +664,7 @@ where
         #[cfg(not(feature = "auth"))]
         let auth_token = None;
 
-        self.core.http_post(url, auth_token, &request).await
+        self.transport.http_post(url, auth_token, &request).await
     }
 
     /// Mint Quote status for Mining Share [NUT-XX]
@@ -683,7 +685,7 @@ where
         #[cfg(not(feature = "auth"))]
         let auth_token = None;
 
-        self.core.http_get(url, auth_token).await
+        self.transport.http_get(url, auth_token).await
     }
 
     /// Mint Tokens for Mining Share [NUT-XX]
@@ -702,7 +704,7 @@ where
         #[cfg(not(feature = "auth"))]
         let auth_token = None;
 
-        self.core.http_post(url, auth_token, &request).await
+        self.transport.http_post(url, auth_token, &request).await
     }
 }
 

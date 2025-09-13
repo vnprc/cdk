@@ -1,4 +1,3 @@
-use cdk_common::amount::to_unit;
 use cdk_common::mint::{IncomingPayment, MintQuote};
 use cdk_common::nuts::nutXX::MintQuoteMiningShareRequest;
 use cdk_common::payment::{
@@ -16,6 +15,7 @@ use cdk_common::{
 #[cfg(feature = "prometheus")]
 use cdk_prometheus::METRICS;
 use tracing::instrument;
+use uuid::Uuid;
 
 use crate::mint::Verification;
 use crate::Mint;
@@ -91,12 +91,40 @@ impl TryFrom<MintQuoteResponse> for MintQuoteBolt12Response<QuoteId> {
     }
 }
 
-impl TryFrom<MintQuoteResponse> for MintQuoteMiningShareResponse<Uuid> {
+impl TryFrom<MintQuoteResponse> for MintQuoteMiningShareResponse<QuoteId> {
     type Error = Error;
 
     fn try_from(response: MintQuoteResponse) -> Result<Self, Self::Error> {
         match response {
             MintQuoteResponse::MiningShare(mining_share_response) => Ok(mining_share_response),
+            _ => Err(Error::InvalidPaymentMethod),
+        }
+    }
+}
+
+impl TryFrom<MintQuoteResponse> for MintQuoteMiningShareResponse<uuid::Uuid> {
+    type Error = Error;
+
+    fn try_from(response: MintQuoteResponse) -> Result<Self, Self::Error> {
+        match response {
+            MintQuoteResponse::MiningShare(mining_share_response) => {
+                // Convert QuoteId to Uuid
+                let uuid = match mining_share_response.quote {
+                    QuoteId::UUID(uuid) => uuid,
+                    _ => return Err(Error::InvalidPaymentMethod),
+                };
+
+                Ok(MintQuoteMiningShareResponse {
+                    quote: uuid,
+                    request: mining_share_response.request,
+                    amount: mining_share_response.amount,
+                    unit: mining_share_response.unit,
+                    state: mining_share_response.state,
+                    expiry: mining_share_response.expiry,
+                    pubkey: mining_share_response.pubkey,
+                    keyset_id: mining_share_response.keyset_id,
+                })
+            }
             _ => Err(Error::InvalidPaymentMethod),
         }
     }
@@ -316,7 +344,9 @@ impl Mint {
                     CreateIncomingPaymentResponse {
                         request: mining_request.header_hash.to_string(),
                         expiry: None,
-                        request_lookup_id: PaymentIdentifier::MiningShareHash(mining_request.header_hash.to_string()),
+                        request_lookup_id: PaymentIdentifier::MiningShareHash(
+                            mining_request.header_hash.to_string(),
+                        ),
                     }
                 }
             };
@@ -335,6 +365,7 @@ impl Mint {
                 unix_time(),
                 vec![],
                 vec![],
+                None,
             );
 
             tracing::debug!(
@@ -692,7 +723,7 @@ impl Mint {
         tx.commit().await?;
 
         // Broadcast notification
-        let res: MintQuoteMiningShareResponse<Uuid> = quote.clone().try_into()?;
+        let res: MintQuoteMiningShareResponse<QuoteId> = quote.clone().try_into()?;
         self.pubsub_manager
             .broadcast(NotificationPayload::MintQuoteMiningShareResponse(res));
 
@@ -863,7 +894,7 @@ impl Mint {
                 // We don't send ws updates for unknown methods
             }
         }
-        
+
         // Also send generic mint quote issue notification
         self.pubsub_manager
             .mint_quote_issue(&mint_quote, total_issued);

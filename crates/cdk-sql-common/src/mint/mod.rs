@@ -1103,7 +1103,7 @@ where
         let start_time = std::time::Instant::now();
         let conn = self.pool.get().map_err(|e| Error::Database(Box::new(e)))?;
 
-        let result = async {
+        let result: Result<Option<MintQuote>, Error> = async {
             let payments = get_mint_quote_payments(&*conn, quote_id).await?;
             let issuance = get_mint_quote_issuance(&*conn, quote_id).await?;
 
@@ -1132,6 +1132,8 @@ where
             .await?
             .map(|row| sql_row_to_mint_quote(row, payments, issuance))
             .transpose();
+
+            result
         }
         .await;
 

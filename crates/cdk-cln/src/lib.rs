@@ -648,11 +648,11 @@ impl MintPayment for Cln {
                     .await
                     .map_err(Error::from)?
             }
-            _ => {
+            PaymentIdentifier::MiningShareHash(_) => {
                 tracing::error!("Unsupported payment id for CLN");
                 return Err(payment::Error::UnknownPaymentState);
             }
-            PaymentIdentifier::MiningShareHash(_) => {
+            _ => {
                 tracing::error!("Unsupported payment id for CLN");
                 return Err(payment::Error::UnknownPaymentState);
             }

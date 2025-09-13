@@ -782,6 +782,8 @@ pub struct MintQuote {
     pub payment_method: PaymentMethod,
     /// Secret key (optional, hex-encoded)
     pub secret_key: Option<String>,
+    /// Keyset ID (optional)
+    pub keyset_id: Option<String>,
 }
 
 impl From<cdk::wallet::MintQuote> for MintQuote {
@@ -798,6 +800,7 @@ impl From<cdk::wallet::MintQuote> for MintQuote {
             amount_paid: quote.amount_paid.into(),
             payment_method: quote.payment_method.into(),
             secret_key: quote.secret_key.map(|sk| sk.to_secret_hex()),
+            keyset_id: quote.keyset_id.map(|id| id.to_string()),
         }
     }
 }
@@ -824,6 +827,11 @@ impl TryFrom<MintQuote> for cdk::wallet::MintQuote {
             amount_paid: quote.amount_paid.into(),
             payment_method: quote.payment_method.into(),
             secret_key,
+            keyset_id: quote
+                .keyset_id
+                .map(|id_str| id_str.parse::<cdk_common::Id>())
+                .transpose()
+                .map_err(|e| FfiError::InvalidCryptographicKey { msg: e.to_string() })?,
         })
     }
 }
@@ -1034,6 +1042,9 @@ impl From<cdk::nuts::PaymentMethod> for PaymentMethod {
             cdk::nuts::PaymentMethod::Bolt11 => Self::Bolt11,
             cdk::nuts::PaymentMethod::Bolt12 => Self::Bolt12,
             cdk::nuts::PaymentMethod::Custom(s) => Self::Custom { method: s },
+            cdk::nuts::PaymentMethod::MiningShare => Self::Custom {
+                method: "mining_share".to_string(),
+            },
         }
     }
 }

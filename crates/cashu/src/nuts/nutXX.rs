@@ -157,6 +157,24 @@ impl From<MintQuoteMiningShareResponse<Uuid>> for MintQuoteMiningShareResponse<S
     }
 }
 
+#[cfg(feature = "mint")]
+impl From<MintQuoteMiningShareResponse<crate::quote_id::QuoteId>>
+    for MintQuoteMiningShareResponse<String>
+{
+    fn from(value: MintQuoteMiningShareResponse<crate::quote_id::QuoteId>) -> Self {
+        Self {
+            quote: value.quote.to_string(),
+            request: value.request,
+            amount: value.amount,
+            unit: value.unit,
+            state: value.state,
+            expiry: value.expiry,
+            pubkey: value.pubkey,
+            keyset_id: value.keyset_id,
+        }
+    }
+}
+
 /// Quote state for mining shares
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]

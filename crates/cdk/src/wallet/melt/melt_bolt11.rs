@@ -191,6 +191,9 @@ impl Wallet {
             cdk_common::PaymentMethod::Custom(_) => {
                 return Err(Error::UnsupportedPaymentMethod);
             }
+            cdk_common::PaymentMethod::MiningShare => {
+                return Err(Error::UnsupportedPaymentMethod);
+            }
         };
 
         let melt_response = match melt_response {

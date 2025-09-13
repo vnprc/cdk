@@ -604,7 +604,7 @@ impl FromStr for CurrencyUnit {
             "AUTH" => Ok(Self::Auth),
             "HASH" => Ok(Self::Hash),
             // TODO upstream this fix and move CurrencyUnit to nut01
-            _ => Ok(Self::Custom(upper_value.to_string())),
+            _ => Ok(Self::Custom(value.to_string())), // Preserve original case for custom units
         }
     }
 }

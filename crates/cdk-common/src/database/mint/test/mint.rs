@@ -24,6 +24,7 @@ where
         0,
         vec![],
         vec![],
+        None,
     );
 
     let mut tx = Database::begin_transaction(&db).await.unwrap();
@@ -50,6 +51,7 @@ where
         0,
         vec![],
         vec![],
+        None,
     );
     let mut tx = Database::begin_transaction(&db).await.unwrap();
     assert!(tx.add_mint_quote(mint_quote.clone()).await.is_ok());
@@ -79,6 +81,7 @@ where
         0,
         vec![],
         vec![],
+        None,
     );
 
     let mut tx = Database::begin_transaction(&db).await.unwrap();
@@ -138,6 +141,7 @@ where
         0,
         vec![],
         vec![],
+        None,
     );
 
     let p1 = unique_string();
@@ -202,6 +206,7 @@ where
         0,
         vec![],
         vec![],
+        None,
     );
 
     let p1 = unique_string();
@@ -249,6 +254,7 @@ where
         0,
         vec![],
         vec![],
+        None,
     );
 
     let mut tx = Database::begin_transaction(&db).await.unwrap();
@@ -294,6 +300,7 @@ where
         0,
         vec![],
         vec![],
+        None,
     );
 
     let mut tx = Database::begin_transaction(&db).await.unwrap();
@@ -323,6 +330,7 @@ where
         0,
         vec![],
         vec![],
+        None,
     );
 
     let mut tx = Database::begin_transaction(&db).await.unwrap();
@@ -355,6 +363,7 @@ where
         0,
         vec![],
         vec![],
+        None,
     );
 
     let p1 = unique_string();
@@ -388,6 +397,7 @@ where
         0,
         vec![],
         vec![],
+        None,
     );
 
     let p1 = unique_string();

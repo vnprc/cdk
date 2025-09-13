@@ -427,6 +427,38 @@ impl TryFrom<MintQuote> for MintQuoteMiningShareResponse<String> {
     }
 }
 
+#[cfg(feature = "mint")]
+impl TryFrom<crate::mint::MintQuote> for MintQuoteMiningShareResponse<uuid::Uuid> {
+    type Error = crate::Error;
+
+    fn try_from(mint_quote: crate::mint::MintQuote) -> Result<Self, Self::Error> {
+        let pubkey = mint_quote
+            .pubkey
+            .ok_or(crate::Error::InvalidPaymentRequest)?;
+        let keyset_id = mint_quote
+            .keyset_id
+            .ok_or(crate::Error::InvalidPaymentRequest)?;
+        let state = mint_quote.state().into();
+
+        // Convert QuoteId to Uuid
+        let uuid = match mint_quote.id {
+            cashu::quote_id::QuoteId::UUID(uuid) => uuid,
+            _ => return Err(crate::Error::InvalidPaymentRequest),
+        };
+
+        Ok(MintQuoteMiningShareResponse {
+            quote: uuid,
+            request: mint_quote.request,
+            amount: mint_quote.amount,
+            unit: Some(mint_quote.unit),
+            state,
+            expiry: Some(mint_quote.expiry),
+            pubkey,
+            keyset_id,
+        })
+    }
+}
+
 impl From<&MeltQuote> for MeltQuoteBolt11Response<QuoteId> {
     fn from(melt_quote: &MeltQuote) -> MeltQuoteBolt11Response<QuoteId> {
         MeltQuoteBolt11Response {

@@ -17,6 +17,7 @@ use cdk::nuts::{
 use cdk::util::unix_time;
 use paste::paste;
 use tracing::instrument;
+use uuid::Uuid;
 
 #[cfg(feature = "auth")]
 use crate::auth::AuthHeader;
@@ -242,7 +243,7 @@ pub(crate) async fn get_check_mint_quote_mining_share(
 
     let quote = state
         .mint
-        .check_mint_quote(&quote_id)
+        .check_mint_quote(&QuoteId::UUID(quote_id))
         .await
         .map_err(|err| {
             tracing::error!("Could not check mint quote {}: {}", quote_id, err);
@@ -250,7 +251,12 @@ pub(crate) async fn get_check_mint_quote_mining_share(
         })?;
 
     // Convert to MintQuoteMiningShareResponse format which now includes the state field
-    Ok(Json(quote.try_into().map_err(into_response)?))
+    let mining_quote: MintQuoteMiningShareResponse<Uuid> = match quote.try_into() {
+        Ok(mining_quote) => mining_quote,
+        Err(_) => return Err((StatusCode::BAD_REQUEST, "Not a mining share quote").into_response()),
+    };
+
+    Ok(Json(mining_quote))
 }
 
 #[instrument(skip_all)]
@@ -339,19 +345,23 @@ pub(crate) async fn post_mint_mining_share(
             .map_err(into_response)?;
     }
 
-    // Convert MintRequest<String> to MintRequest<Uuid>
-    let payload_uuid = MintRequest {
-        quote: payload.quote.parse::<uuid::Uuid>().map_err(|err| {
-            tracing::error!("Invalid quote UUID '{}': {}", payload.quote, err);
-            (StatusCode::BAD_REQUEST, "Invalid quote ID format").into_response()
-        })?,
+    // Convert MintRequest<String> to MintRequest<QuoteId>
+    let payload_quote_id = MintRequest {
+        quote: payload
+            .quote
+            .parse::<uuid::Uuid>()
+            .map(|uuid| QuoteId::UUID(uuid))
+            .map_err(|err| {
+                tracing::error!("Invalid quote UUID '{}': {}", payload.quote, err);
+                (StatusCode::BAD_REQUEST, "Invalid quote ID format").into_response()
+            })?,
         outputs: payload.outputs,
         signature: payload.signature,
     };
 
     let res = state
         .mint
-        .process_mint_request(payload_uuid)
+        .process_mint_request(payload_quote_id)
         .await
         .map_err(|err| {
             tracing::error!("Could not process mining share mint: {}", err);
