@@ -644,21 +644,6 @@ where
         .await
     }
 
-    /// Lookup mint quotes by locking pubkeys
-    #[instrument(skip(self, request), fields(mint_url = %self.mint_url, pubkey_count = ?request.pubkeys.len()))]
-    async fn post_mint_quote_lookup(
-        &self,
-        request: crate::hashpool::PostMintQuoteLookupRequest,
-    ) -> Result<crate::hashpool::PostMintQuoteLookupResponse, Error> {
-        let url = self
-            .mint_url
-            .join_paths(&["v1", "mint", "quote", "lookup"])?;
-        let auth_token = self
-            .get_auth_token(Method::Post, RoutePath::MintQuoteLookup)
-            .await?;
-        self.core.http_post(url, auth_token, &request).await
-    }
-
     /// Mint Quote for Mining Share [NUT-XX]
     #[instrument(skip(self), fields(mint_url = %self.mint_url))]
     async fn post_mint_quote_mining_share(

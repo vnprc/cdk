@@ -3,7 +3,6 @@ use axum::extract::ws::WebSocketUpgrade;
 use axum::extract::{Json, Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use cdk::cdk_payment::PaymentIdentifier;
 use cdk::error::{ErrorCode, ErrorResponse};
 use cdk::mint::QuoteId;
 #[cfg(feature = "auth")]
@@ -17,7 +16,6 @@ use cdk::nuts::{
 };
 use cdk::util::unix_time;
 use paste::paste;
-use std::collections::HashMap;
 use tracing::instrument;
 
 #[cfg(feature = "auth")]

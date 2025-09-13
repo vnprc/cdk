@@ -323,26 +323,6 @@ impl Wallet {
         }
     }
 
-    /// Lookup mint quotes by locking pubkeys
-    ///
-    /// # Arguments
-    /// * `pubkeys` - Public keys to lookup quotes for
-    /// * `state_filter` - Explicit state filter specifying which quotes to return
-    #[instrument(skip(self, pubkeys), fields(mint_url = %self.mint_url, pubkey_count = ?pubkeys.len()))]
-    pub async fn lookup_mint_quotes_by_pubkeys(
-        &self,
-        pubkeys: &[crate::nuts::PublicKey],
-        state_filter: crate::hashpool::MintQuoteStateFilter,
-    ) -> Result<Vec<crate::hashpool::MintQuoteLookupItem>, Error> {
-        let request = crate::hashpool::PostMintQuoteLookupRequest {
-            pubkeys: pubkeys.to_vec(),
-            state_filter,
-        };
-
-        let response = self.client.post_mint_quote_lookup(request).await?;
-        Ok(response.quotes)
-    }
-
     /// Get amounts needed to refill proof state
     #[instrument(skip(self))]
     pub async fn amounts_needed_for_state_target(&self) -> Result<Vec<Amount>, Error> {

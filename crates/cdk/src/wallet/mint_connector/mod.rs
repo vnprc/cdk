@@ -76,12 +76,6 @@ pub trait MintConnector: Debug {
     /// Restore request [NUT-13]
     async fn post_restore(&self, request: RestoreRequest) -> Result<RestoreResponse, Error>;
 
-    /// Lookup mint quotes by locking pubkeys
-    async fn post_mint_quote_lookup(
-        &self,
-        request: crate::hashpool::PostMintQuoteLookupRequest,
-    ) -> Result<crate::hashpool::PostMintQuoteLookupResponse, Error>;
-
     /// Get the auth wallet for the client
     #[cfg(feature = "auth")]
     async fn get_auth_wallet(&self) -> Option<AuthWallet>;

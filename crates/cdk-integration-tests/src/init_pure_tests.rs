@@ -203,17 +203,6 @@ impl MintConnector for DirectMintConnection {
         Err(Error::UnsupportedPaymentMethod)
     }
 
-    async fn post_mint_quote_lookup(
-        &self,
-        request: cdk::hashpool::PostMintQuoteLookupRequest,
-    ) -> Result<cdk::hashpool::PostMintQuoteLookupResponse, Error> {
-        let quotes = self
-            .mint
-            .lookup_mint_quotes_by_pubkeys(&request.pubkeys, request.state_filter)
-            .await?;
-        Ok(cdk::hashpool::PostMintQuoteLookupResponse { quotes })
-    }
-
     /// Mint Quote for Mining Share [NUT-XX] (Not implemented in tests)
     async fn post_mint_quote_mining_share(
         &self,
