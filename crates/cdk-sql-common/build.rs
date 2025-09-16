@@ -102,10 +102,22 @@ fn main() {
             };
 
             let rel_name = &path.file_name().unwrap().to_str().unwrap();
-            let rel_path = &path.to_str().unwrap().replace("\\", "/")[skip_path..]; // for Windows
+
+            // Copy migration file to OUT_DIR
+            let relative_path = path.strip_prefix(root).unwrap();
+            let dest_migration_file = out_dir.join(relative_path);
+            if let Some(parent) = dest_migration_file.parent() {
+                fs::create_dir_all(parent)
+                    .expect("Failed to create migration directory in OUT_DIR");
+            }
+            fs::copy(path, &dest_migration_file).expect("Failed to copy migration file to OUT_DIR");
+
+            // Use path relative to OUT_DIR for include_str
+            let relative_to_out_dir = relative_path.to_str().unwrap().replace("\\", "/");
             writeln!(
                 out_file,
-                "    (\"{prefix}\", \"{rel_name}\", include_str!(r#\".{rel_path}\"#)),"
+                "    (\"{prefix}\", \"{rel_name}\", include_str!(r#\"{}\"#)),",
+                relative_to_out_dir
             )
             .unwrap();
             println!("cargo:rerun-if-changed={}", path.display());
