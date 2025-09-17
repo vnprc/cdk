@@ -14,7 +14,6 @@ fn main() {
     for migration_path in find_migrations_dirs(root) {
         // Step 3: Output file path to OUT_DIR instead of source directory
         let parent = migration_path.parent().unwrap();
-        let skip_path = parent.to_str().unwrap_or_default().len();
 
         // Create a unique filename based on the migration path to avoid conflicts
         let migration_name = parent
