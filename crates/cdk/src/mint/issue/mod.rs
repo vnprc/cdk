@@ -123,6 +123,7 @@ impl TryFrom<MintQuoteResponse> for MintQuoteMiningShareResponse<uuid::Uuid> {
                     expiry: mining_share_response.expiry,
                     pubkey: mining_share_response.pubkey,
                     keyset_id: mining_share_response.keyset_id,
+                    amount_issued: mining_share_response.amount_issued,
                 })
             }
             _ => Err(Error::InvalidPaymentMethod),

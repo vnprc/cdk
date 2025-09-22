@@ -192,7 +192,7 @@ impl Wallet {
                     state: response.state.into(),
                     expiry: response.expiry.unwrap_or(0),
                     secret_key: None,
-                    amount_issued: Amount::ZERO,
+                    amount_issued: response.amount_issued,
                     amount_paid: response.amount.unwrap_or(Amount::ZERO),
                     keyset_id: Some(response.keyset_id),
                 };

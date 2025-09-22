@@ -413,6 +413,7 @@ impl TryFrom<crate::mint::MintQuote> for MintQuoteMiningShareResponse<QuoteId> {
             expiry: Some(mint_quote.expiry),
             pubkey,
             keyset_id,
+            amount_issued: mint_quote.amount_issued,
         })
     }
 }
@@ -455,6 +456,7 @@ impl TryFrom<crate::mint::MintQuote> for MintQuoteMiningShareResponse<uuid::Uuid
             expiry: Some(mint_quote.expiry),
             pubkey,
             keyset_id,
+            amount_issued: mint_quote.amount_issued,
         })
     }
 }
