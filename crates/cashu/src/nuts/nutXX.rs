@@ -109,9 +109,9 @@ pub struct MintQuoteMiningShareRequest {
 impl MintQuoteMiningShareRequest {
     /// Validate the mining share request
     pub fn validate(&self) -> Result<(), Error> {
-        // Valid amounts are between 1 and 256 inclusive
-        // TODO fix ehash units to be 2^diff rather than just diff
-        if self.amount == Amount::ZERO || self.amount > Amount::from(256) {
+        // Valid amounts are between 1 and u64::MAX inclusive
+        // Amounts use exponential units (2^difficulty)
+        if self.amount == Amount::ZERO || self.amount > Amount::from(u64::MAX) {
             return Err(Error::InvalidAmount);
         }
 
