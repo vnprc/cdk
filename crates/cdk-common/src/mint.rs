@@ -397,23 +397,32 @@ impl TryFrom<crate::mint::MintQuote> for MintQuoteMiningShareResponse<QuoteId> {
     type Error = crate::Error;
 
     fn try_from(mint_quote: crate::mint::MintQuote) -> Result<Self, Self::Error> {
-        let pubkey = mint_quote
-            .pubkey
-            .ok_or(crate::Error::InvalidPaymentRequest)?;
-        let keyset_id = mint_quote
-            .keyset_id
-            .ok_or(crate::Error::InvalidPaymentRequest)?;
         let state = mint_quote.state().into();
-        Ok(MintQuoteMiningShareResponse {
-            quote: mint_quote.id,
-            request: mint_quote.request,
-            amount: mint_quote.amount,
-            unit: Some(mint_quote.unit),
-            state,
-            expiry: Some(mint_quote.expiry),
+        let crate::mint::MintQuote {
+            id,
+            request,
+            amount,
+            unit,
+            expiry,
+            amount_issued,
             pubkey,
             keyset_id,
-            amount_issued: mint_quote.amount_issued,
+            ..
+        } = mint_quote;
+
+        let pubkey = pubkey.ok_or(crate::Error::InvalidPaymentRequest)?;
+        let keyset_id = keyset_id.ok_or(crate::Error::InvalidPaymentRequest)?;
+
+        Ok(MintQuoteMiningShareResponse {
+            quote: id,
+            request,
+            amount,
+            unit: Some(unit),
+            state,
+            expiry: Some(expiry),
+            pubkey,
+            keyset_id,
+            amount_issued,
         })
     }
 }
@@ -433,30 +442,38 @@ impl TryFrom<crate::mint::MintQuote> for MintQuoteMiningShareResponse<uuid::Uuid
     type Error = crate::Error;
 
     fn try_from(mint_quote: crate::mint::MintQuote) -> Result<Self, Self::Error> {
-        let pubkey = mint_quote
-            .pubkey
-            .ok_or(crate::Error::InvalidPaymentRequest)?;
-        let keyset_id = mint_quote
-            .keyset_id
-            .ok_or(crate::Error::InvalidPaymentRequest)?;
         let state = mint_quote.state().into();
+        let crate::mint::MintQuote {
+            id,
+            request,
+            amount,
+            unit,
+            expiry,
+            amount_issued,
+            pubkey,
+            keyset_id,
+            ..
+        } = mint_quote;
+
+        let pubkey = pubkey.ok_or(crate::Error::InvalidPaymentRequest)?;
+        let keyset_id = keyset_id.ok_or(crate::Error::InvalidPaymentRequest)?;
 
         // Convert QuoteId to Uuid
-        let uuid = match mint_quote.id {
+        let uuid = match id {
             cashu::quote_id::QuoteId::UUID(uuid) => uuid,
             _ => return Err(crate::Error::InvalidPaymentRequest),
         };
 
         Ok(MintQuoteMiningShareResponse {
             quote: uuid,
-            request: mint_quote.request,
-            amount: mint_quote.amount,
-            unit: Some(mint_quote.unit),
+            request,
+            amount,
+            unit: Some(unit),
             state,
-            expiry: Some(mint_quote.expiry),
+            expiry: Some(expiry),
             pubkey,
             keyset_id,
-            amount_issued: mint_quote.amount_issued,
+            amount_issued,
         })
     }
 }

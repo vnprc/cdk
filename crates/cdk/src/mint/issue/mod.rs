@@ -254,6 +254,9 @@ impl Mint {
             let amount;
             let pubkey;
             let payment_method;
+            let mut amount_paid = Amount::ZERO;
+            let mut payments: Vec<IncomingPayment> = Vec::new();
+            let mut keyset_id: Option<cdk_common::nuts::Id> = None;
 
             let create_invoice_response = match mint_quote_request {
                 MintQuoteRequest::Bolt11(bolt11_request) => {
@@ -329,6 +332,10 @@ impl Mint {
                         })?
                 }
                 MintQuoteRequest::MiningShare(mining_request) => {
+                    mining_request
+                        .validate()
+                        .map_err(|_| Error::InvalidPaymentRequest)?;
+
                     unit = mining_request.unit;
                     amount = Some(mining_request.amount);
                     pubkey = Some(mining_request.pubkey);
@@ -341,13 +348,32 @@ impl Mint {
                     )
                     .await?;
 
+                    let mint_ttl = self.localstore.get_quote_ttl().await?.mint_ttl;
+
+                    let header_hash = mining_request.header_hash.to_string();
+                    let request_lookup_id = PaymentIdentifier::MiningShareHash(header_hash.clone());
+
+                    let payment_amount = mining_request.amount;
+                    amount_paid = payment_amount;
+                    payments.push(IncomingPayment {
+                        amount: payment_amount,
+                        time: unix_time(),
+                        payment_id: request_lookup_id.to_string(),
+                    });
+
+                    let active_keysets = self.get_active_keysets();
+                    keyset_id = Some(
+                        active_keysets
+                            .get(&unit)
+                            .cloned()
+                            .ok_or(Error::NoActiveKeyset)?,
+                    );
+
                     // Mining shares don't use payment processors - they create direct payment identifiers
                     CreateIncomingPaymentResponse {
-                        request: mining_request.header_hash.to_string(),
-                        expiry: None,
-                        request_lookup_id: PaymentIdentifier::MiningShareHash(
-                            mining_request.header_hash.to_string(),
-                        ),
+                        request: header_hash,
+                        expiry: Some(unix_time() + mint_ttl),
+                        request_lookup_id,
                     }
                 }
             };
@@ -360,13 +386,13 @@ impl Mint {
                 create_invoice_response.expiry.unwrap_or(0),
                 create_invoice_response.request_lookup_id.clone(),
                 pubkey,
-                Amount::ZERO,
+                amount_paid,
                 Amount::ZERO,
                 payment_method.clone(),
                 unix_time(),
+                payments,
                 vec![],
-                vec![],
-                None,
+                keyset_id,
             );
 
             tracing::debug!(

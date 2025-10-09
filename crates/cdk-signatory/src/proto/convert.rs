@@ -43,6 +43,19 @@ impl TryInto<crate::signatory::SignatoryKeySet> for KeySet {
     type Error = cdk_common::Error;
 
     fn try_into(self) -> Result<crate::signatory::SignatoryKeySet, Self::Error> {
+        let keys_map = self
+            .keys
+            .ok_or(cdk_common::Error::Custom(INTERNAL_ERROR.to_owned()))?
+            .keys
+            .into_iter()
+            .map(|(amount, pk)| PublicKey::from_slice(&pk).map(|pk| (amount.into(), pk)))
+            .collect::<Result<BTreeMap<Amount, _>, _>>()?;
+
+        let amounts = keys_map
+            .keys()
+            .map(|amount| (*amount).into())
+            .collect::<Vec<u64>>();
+
         Ok(crate::signatory::SignatoryKeySet {
             id: Id::from_bytes(&self.id)?,
             unit: self
@@ -51,15 +64,9 @@ impl TryInto<crate::signatory::SignatoryKeySet> for KeySet {
                 .try_into()
                 .map_err(|_| cdk_common::Error::Custom("Invalid currency unit".to_owned()))?,
             active: self.active,
+            keys: cdk_common::Keys::new(keys_map),
+            amounts,
             input_fee_ppk: self.input_fee_ppk,
-            keys: cdk_common::Keys::new(
-                self.keys
-                    .ok_or(cdk_common::Error::Custom(INTERNAL_ERROR.to_owned()))?
-                    .keys
-                    .into_iter()
-                    .map(|(amount, pk)| PublicKey::from_slice(&pk).map(|pk| (amount.into(), pk)))
-                    .collect::<Result<BTreeMap<Amount, _>, _>>()?,
-            ),
             final_expiry: self.final_expiry,
         })
     }
