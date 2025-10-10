@@ -1032,6 +1032,47 @@ where
         get_keyset_by_id_inner(&*conn, keyset_id, false).await
     }
 
+    #[instrument(skip_all)]
+    async fn add_mint_quote(&self, quote: MintQuote) -> Result<(), Self::Err> {
+        let conn = self.pool.get().map_err(|e| Error::Database(Box::new(e)))?;
+        query(
+            r#"
+INSERT INTO mint_quote
+(id, mint_url, amount, unit, request, state, expiry, secret_key, payment_method, amount_issued, amount_paid, keyset_id)
+VALUES
+(:id, :mint_url, :amount, :unit, :request, :state, :expiry, :secret_key, :payment_method, :amount_issued, :amount_paid, :keyset_id)
+ON CONFLICT(id) DO UPDATE SET
+    mint_url = excluded.mint_url,
+    amount = excluded.amount,
+    unit = excluded.unit,
+    request = excluded.request,
+    state = excluded.state,
+    expiry = excluded.expiry,
+    secret_key = excluded.secret_key,
+    payment_method = excluded.payment_method,
+    amount_issued = excluded.amount_issued,
+    amount_paid = excluded.amount_paid,
+    keyset_id = excluded.keyset_id
+;
+        "#,
+        )?
+        .bind("id", quote.id.to_string())
+        .bind("mint_url", quote.mint_url.to_string())
+        .bind("amount", quote.amount.map(|a| a.to_i64()))
+        .bind("unit", quote.unit.to_string())
+        .bind("request", quote.request)
+        .bind("state", quote.state.to_string())
+        .bind("expiry", quote.expiry as i64)
+        .bind("secret_key", quote.secret_key.map(|p| p.to_string()))
+        .bind("payment_method", quote.payment_method.to_string())
+        .bind("amount_issued", quote.amount_issued.to_i64())
+        .bind("amount_paid", quote.amount_paid.to_i64())
+        .bind("keyset_id", quote.keyset_id.map(|k| k.to_string()))
+        .execute(&*conn).await?;
+
+        Ok(())
+    }
+
     #[instrument(skip(self))]
     async fn get_mint_quote(&self, quote_id: &str) -> Result<Option<MintQuote>, Self::Err> {
         let conn = self.pool.get().map_err(|e| Error::Database(Box::new(e)))?;
@@ -1054,7 +1095,8 @@ where
                 secret_key,
                 payment_method,
                 amount_issued,
-                amount_paid
+                amount_paid,
+                keyset_id
             FROM
                 mint_quote
             "#,
@@ -1417,7 +1459,8 @@ fn sql_row_to_mint_quote(row: Vec<Column>) -> Result<MintQuote, Error> {
             secret_key,
             row_method,
             row_amount_minted,
-            row_amount_paid
+            row_amount_paid,
+            keyset_id
         ) = row
     );
 
@@ -1427,6 +1470,9 @@ fn sql_row_to_mint_quote(row: Vec<Column>) -> Result<MintQuote, Error> {
     let amount_minted: u64 = column_as_number!(row_amount_minted);
     let payment_method =
         PaymentMethod::from_str(&column_as_string!(row_method)).map_err(Error::from)?;
+    let keyset_id = column_as_nullable_string!(keyset_id)
+        .map(|value| Id::from_str(&value))
+        .transpose()?;
 
     Ok(MintQuote {
         id: column_as_string!(id),
@@ -1442,6 +1488,7 @@ fn sql_row_to_mint_quote(row: Vec<Column>) -> Result<MintQuote, Error> {
         payment_method,
         amount_issued: amount_minted.into(),
         amount_paid: amount_paid.into(),
+        keyset_id,
     })
 }
 

@@ -65,6 +65,7 @@ impl Wallet {
             quote_res.request,
             quote_res.expiry.unwrap_or(0),
             Some(secret_key),
+            None,
         );
 
         let mut tx = self.localstore.begin_db_transaction().await?;
