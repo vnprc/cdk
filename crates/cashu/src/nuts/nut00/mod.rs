@@ -561,6 +561,8 @@ pub enum PaymentMethod {
     Bolt11,
     /// Bolt12
     Bolt12,
+    /// Mining share payout
+    MiningShare,
     /// Custom
     Custom(String),
 }
@@ -571,6 +573,7 @@ impl FromStr for PaymentMethod {
         match value.to_lowercase().as_str() {
             "bolt11" => Ok(Self::Bolt11),
             "bolt12" => Ok(Self::Bolt12),
+            "mining_share" => Ok(Self::MiningShare),
             c => Ok(Self::Custom(c.to_string())),
         }
     }
@@ -581,6 +584,7 @@ impl fmt::Display for PaymentMethod {
         match self {
             PaymentMethod::Bolt11 => write!(f, "bolt11"),
             PaymentMethod::Bolt12 => write!(f, "bolt12"),
+            PaymentMethod::MiningShare => write!(f, "mining_share"),
             PaymentMethod::Custom(p) => write!(f, "{p}"),
         }
     }

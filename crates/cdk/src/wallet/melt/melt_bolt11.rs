@@ -211,21 +211,21 @@ impl Wallet {
         tx.commit().await?;
 
         let melt_response = match quote_info.payment_method {
-            cdk_common::PaymentMethod::Bolt11 => {
+            PaymentMethod::Bolt11 => {
                 self.try_proof_operation_or_reclaim(
                     request.inputs().clone(),
                     self.client.post_melt(request),
                 )
                 .await?
             }
-            cdk_common::PaymentMethod::Bolt12 => {
+            PaymentMethod::Bolt12 => {
                 self.try_proof_operation_or_reclaim(
                     request.inputs().clone(),
                     self.client.post_melt_bolt12(request),
                 )
                 .await?
             }
-            cdk_common::PaymentMethod::Custom(_) => {
+            PaymentMethod::MiningShare | PaymentMethod::Custom(_) => {
                 return Err(Error::UnsupportedPaymentMethod);
             }
         };
