@@ -253,6 +253,9 @@ pub struct MintQuote {
     /// Payment of payment(s) that filled quote
     #[serde(default)]
     pub issuance: Vec<Issuance>,
+    /// Keyset ID for mining share quotes
+    #[serde(default)]
+    pub keyset_id: Option<Id>,
 }
 
 impl MintQuote {
@@ -272,6 +275,7 @@ impl MintQuote {
         created_time: u64,
         payments: Vec<IncomingPayment>,
         issuance: Vec<Issuance>,
+        keyset_id: Option<Id>,
     ) -> Self {
         let id = id.unwrap_or_else(QuoteId::new_uuid);
 
@@ -289,6 +293,7 @@ impl MintQuote {
             payment_method,
             payments,
             issuance,
+            keyset_id,
         }
     }
 
