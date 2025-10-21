@@ -49,6 +49,12 @@ pub trait WalletDatabase: Send + Sync {
     /// Get mint quotes from storage
     async fn get_mint_quotes(&self) -> Result<Vec<MintQuote>, FfiError>;
 
+    /// Get pending mint quotes from storage (quotes with mintable balance or bolt12 quotes)
+    async fn get_pending_mint_quotes(&self) -> Result<Vec<MintQuote>, FfiError>;
+
+    /// Remove mint quote from storage
+    async fn remove_mint_quote(&self, quote_id: String) -> Result<(), FfiError>;
+
     /// Get melt quote from storage
     async fn get_melt_quote(&self, quote_id: String) -> Result<Option<MeltQuote>, FfiError>;
 
@@ -142,6 +148,9 @@ pub trait WalletDatabaseTransaction: Send + Sync {
 
     /// Add mint quote to storage
     async fn add_mint_quote(&self, quote: MintQuote) -> Result<(), FfiError>;
+
+    /// Get pending mint quotes from storage (quotes with mintable balance or bolt12 quotes)
+    async fn get_pending_mint_quotes(&self) -> Result<Vec<MintQuote>, FfiError>;
 
     /// Remove mint quote from storage
     async fn remove_mint_quote(&self, quote_id: String) -> Result<(), FfiError>;
@@ -465,6 +474,27 @@ impl CdkWalletDatabase for WalletDatabaseBridge {
             .collect::<Result<Vec<_>, _>>()?)
     }
 
+    async fn get_pending_mint_quotes(&self) -> Result<Vec<cdk::wallet::MintQuote>, Self::Err> {
+        let result = self
+            .ffi_db
+            .get_pending_mint_quotes()
+            .await
+            .map_err(|e| cdk::cdk_database::Error::Database(e.to_string().into()))?;
+        Ok(result
+            .into_iter()
+            .map(|q| {
+                q.try_into()
+                    .map_err(|e: FfiError| cdk::cdk_database::Error::Database(e.to_string().into()))
+            })
+            .collect::<Result<Vec<_>, _>>()?)
+    }
+
+    async fn remove_mint_quote(&self, quote_id: &str) -> Result<(), Self::Err> {
+        self.ffi_db
+            .remove_mint_quote(quote_id.to_string())
+            .await
+            .map_err(|e| cdk::cdk_database::Error::Database(e.to_string().into()))
+    }
     // Melt Quote Management
     async fn get_melt_quote(
         &self,
@@ -1144,6 +1174,22 @@ where
             .await
             .map_err(|e| FfiError::Database { msg: e.to_string() })?;
         Ok(result.into_iter().map(|q| q.into()).collect())
+    }
+
+    async fn get_pending_mint_quotes(&self) -> Result<Vec<MintQuote>, FfiError> {
+        let result = self
+            .inner
+            .get_pending_mint_quotes()
+            .await
+            .map_err(|e| FfiError::Database { msg: e.to_string() })?;
+        Ok(result.into_iter().map(|q| q.into()).collect())
+    }
+
+    async fn remove_mint_quote(&self, quote_id: String) -> Result<(), FfiError> {
+        self.inner
+            .remove_mint_quote(&quote_id)
+            .await
+            .map_err(|e| FfiError::Database { msg: e.to_string() })
     }
 
     async fn get_melt_quote(&self, quote_id: String) -> Result<Option<MeltQuote>, FfiError> {

@@ -1067,6 +1067,85 @@ where
     }
 
     #[instrument(skip(self))]
+    async fn get_pending_mint_quotes(&self) -> Result<Vec<MintQuote>, Self::Err> {
+        let conn = self.pool.get().map_err(|e| Error::Database(Box::new(e)))?;
+        Ok(query(
+            r#"
+            SELECT
+                id,
+                mint_url,
+                amount,
+                unit,
+                request,
+                state,
+                expiry,
+                secret_key,
+                payment_method,
+                amount_issued,
+                amount_paid,
+                keyset_id
+            FROM
+                mint_quote
+            WHERE
+                (amount_paid > amount_issued AND amount_paid > 0)
+                OR
+                payment_method = 'bolt12'
+            ORDER BY created_time ASC
+            "#,
+        )?
+        .fetch_all(&*conn)
+        .await?
+        .into_iter()
+        .map(sql_row_to_mint_quote)
+        .collect::<Result<_, _>>()?)
+    }
+
+    #[instrument(skip(self))]
+    async fn remove_mint_quote(&self, quote_id: &str) -> Result<(), Self::Err> {
+        let conn = self.pool.get().map_err(|e| Error::Database(Box::new(e)))?;
+        query(r#"DELETE FROM mint_quote WHERE id=:id"#)?
+            .bind("id", quote_id.to_string())
+            .execute(&*conn)
+            .await?;
+
+        Ok(())
+    }
+
+    #[instrument(skip_all)]
+    async fn add_melt_quote(&self, quote: wallet::MeltQuote) -> Result<(), Self::Err> {
+        let conn = self.pool.get().map_err(|e| Error::Database(Box::new(e)))?;
+        query(
+            r#"
+INSERT INTO melt_quote
+(id, unit, amount, request, fee_reserve, state, expiry, payment_method)
+VALUES
+(:id, :unit, :amount, :request, :fee_reserve, :state, :expiry, :payment_method)
+ON CONFLICT(id) DO UPDATE SET
+    unit = excluded.unit,
+    amount = excluded.amount,
+    request = excluded.request,
+    fee_reserve = excluded.fee_reserve,
+    state = excluded.state,
+    expiry = excluded.expiry,
+    payment_method = excluded.payment_method
+;
+        "#,
+        )?
+        .bind("id", quote.id.to_string())
+        .bind("unit", quote.unit.to_string())
+        .bind("amount", u64::from(quote.amount) as i64)
+        .bind("request", quote.request)
+        .bind("fee_reserve", u64::from(quote.fee_reserve) as i64)
+        .bind("state", quote.state.to_string())
+        .bind("expiry", quote.expiry as i64)
+        .bind("payment_method", quote.payment_method.to_string())
+        .execute(&*conn)
+        .await?;
+
+        Ok(())
+    }
+
+    #[instrument(skip(self))]
     async fn get_melt_quote(&self, quote_id: &str) -> Result<Option<wallet::MeltQuote>, Self::Err> {
         let conn = self.pool.get().map_err(|e| Error::Database(Box::new(e)))?;
         get_melt_quote_inner(&*conn, quote_id, false).await
