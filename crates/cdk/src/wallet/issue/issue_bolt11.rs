@@ -138,10 +138,7 @@ impl Wallet {
                     .mint(&mint_quote.id, SplitTarget::default(), None)
                     .await?;
                 total_amount += proofs.total_amount()?;
-            } else if mint_quote.expiry.le(&unix_time()) {
-                let mut tx = self.localstore.begin_db_transaction().await?;
-                tx.remove_mint_quote(&mint_quote.id).await?;
-                tx.commit().await?;
+            }
             }
         }
         Ok(total_amount)
@@ -318,12 +315,7 @@ impl Wallet {
             premint_secrets.secrets(),
             &keys,
         )?;
-
         let mut tx = self.localstore.begin_db_transaction().await?;
-
-        // Remove filled quote from store
-        tx.remove_mint_quote(&quote_info.id).await?;
-
         let proof_infos = proofs
             .iter()
             .map(|proof| {
