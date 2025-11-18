@@ -70,11 +70,11 @@ CREATE INDEX direction_index ON transactions(direction);
 CREATE INDEX unit_index ON transactions(unit);
 CREATE INDEX timestamp_index ON transactions(timestamp);
 CREATE TABLE IF NOT EXISTS "mint_quote" (
-  id TEXT PRIMARY KEY, mint_url TEXT NOT NULL, 
-  payment_method TEXT NOT NULL DEFAULT 'bolt11', 
-  amount INTEGER, unit TEXT NOT NULL, 
-  request TEXT NOT NULL, state TEXT NOT NULL, 
-  expiry INTEGER NOT NULL, amount_paid INTEGER NOT NULL DEFAULT 0, 
-  amount_issued INTEGER NOT NULL DEFAULT 0, 
-  secret_key TEXT
+  id TEXT PRIMARY KEY, mint_url TEXT NOT NULL,
+  payment_method TEXT NOT NULL DEFAULT 'bolt11',
+  amount INTEGER, unit TEXT NOT NULL,
+  request TEXT NOT NULL, state TEXT NOT NULL,
+  expiry INTEGER NOT NULL, amount_paid INTEGER NOT NULL DEFAULT 0,
+  amount_issued INTEGER NOT NULL DEFAULT 0,
+  secret_key TEXT, spending_condition TEXT
 );

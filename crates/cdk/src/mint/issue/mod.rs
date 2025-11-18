@@ -763,6 +763,33 @@ impl Mint {
                 ));
             }
 
+            // Validate NUT-20 signatures if provided
+            if let Some(ref signatures) = batch_request.signature {
+                for (i, (quote, signature)) in quotes.iter().zip(signatures.iter()).enumerate() {
+                    // If signature is non-null, we need to verify it against the quote's pubkey
+                    if let Some(ref sig_str) = signature {
+                        // Get the pubkey from the quote
+                        if let Some(pubkey) = &quote.pubkey {
+                            // Create a temporary MintRequest to verify the signature
+                            // This leverages the existing NUT-20 signature verification logic
+                            let mint_req = cdk_common::nuts::MintRequest {
+                                quote: batch_request.quote[i].clone(),
+                                outputs: vec![batch_request.outputs[i].clone()],
+                                signature: Some(sig_str.clone()),
+                            };
+
+                            mint_req.verify_signature(pubkey.clone())?;
+                        } else {
+                            // Signature provided but quote doesn't have a pubkey
+                            return Err(Error::Custom(
+                                "Quote signature provided but quote has no pubkey".to_string(),
+                            ));
+                        }
+                    }
+                    // If signature is null, that's fine - the quote is unlocked
+                }
+            }
+
             // Generate blind signatures before transaction
             let blind_signatures = self.blind_sign(batch_request.outputs.clone()).await?;
 

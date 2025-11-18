@@ -136,12 +136,46 @@ impl Wallet {
             }
         };
 
-        // Build the batch mint request
-        // NUT-20 signature support can be added here when spending_condition is available on MintQuote
+        // Build the batch mint request with NUT-20 signature support
+        // Generate signatures for quotes that have secret keys (NUT-20 locked quotes)
+        let mut batch_signatures: Option<Vec<Option<String>>> = None;
+
+        // Check if any quotes have secret keys (are NUT-20 locked)
+        let has_any_secrets = quote_infos.iter().any(|q| q.secret_key.is_some());
+
+        if has_any_secrets {
+            // Create signature array with null for unlocked, signature for locked
+            let mut signatures = Vec::new();
+            let blinded_messages = premint_secrets.blinded_messages();
+
+            for (i, quote_info) in quote_infos.iter().enumerate() {
+                if let Some(secret_key) = &quote_info.secret_key {
+                    // Generate NUT-20 signature for this quote
+                    let mut mint_req = cdk_common::nuts::MintRequest {
+                        quote: quote_ids[i].clone(),
+                        outputs: vec![blinded_messages[i].clone()],
+                        signature: None,
+                    };
+
+                    // Sign the request
+                    mint_req
+                        .sign(secret_key.clone())
+                        .map_err(|_| Error::Custom("Failed to sign mint request".to_string()))?;
+
+                    signatures.push(mint_req.signature);
+                } else {
+                    // Quote is not NUT-20 locked, no signature needed
+                    signatures.push(None);
+                }
+            }
+
+            batch_signatures = Some(signatures);
+        }
+
         let batch_request = BatchMintRequest {
             quote: quote_ids.clone(),
             outputs: premint_secrets.blinded_messages(),
-            signature: None, // NUT-20 signatures deferred - requires quote details with spending_condition
+            signature: batch_signatures,
         };
 
         // First check all quotes status before minting
