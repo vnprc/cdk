@@ -205,6 +205,59 @@ impl MintConnector for DirectMintConnection {
         // Implementation to be added later
         Err(Error::UnsupportedPaymentMethod)
     }
+
+    /// Batch Mint Quote Status [NUT-XX]
+    async fn post_mint_batch_quote_status(
+        &self,
+        request: cdk_common::mint::BatchQuoteStatusRequest,
+    ) -> Result<cdk_common::mint::BatchQuoteStatusResponse, Error> {
+        let mut responses = Vec::new();
+        for quote_id_str in request.quote {
+            let quote_id = QuoteId::from_str(&quote_id_str)?;
+            match self.mint.check_mint_quote(&quote_id).await {
+                Ok(quote_response) => {
+                    responses.push(quote_response.into());
+                }
+                Err(_) => {
+                    // Skip unknown quotes as per spec
+                }
+            }
+        }
+        Ok(cdk_common::mint::BatchQuoteStatusResponse(responses))
+    }
+
+    /// Batch Mint [NUT-XX]
+    async fn post_mint_batch(
+        &self,
+        request: cdk_common::mint::BatchMintRequest,
+    ) -> Result<MintResponse, Error> {
+        // Validate all quotes exist and batch is valid
+        let mut quote_ids = Vec::new();
+        for quote_str in &request.quote {
+            let quote_id = QuoteId::from_str(quote_str)?;
+            quote_ids.push(quote_id);
+        }
+
+        // Convert to MintRequest for processing
+        // For batch, we need to process multiple quotes but return signatures in same order
+        let mut all_signatures = Vec::new();
+
+        for (quote_id, output) in quote_ids.iter().zip(&request.outputs) {
+            // Create individual mint request for each quote
+            let mint_req = MintRequest {
+                quote: quote_id.clone(),
+                outputs: vec![output.clone()],
+                signature: None,
+            };
+
+            let response = self.mint.process_mint_request(mint_req).await?;
+            all_signatures.extend(response.signatures);
+        }
+
+        Ok(MintResponse {
+            signatures: all_signatures,
+        })
+    }
 }
 
 pub fn setup_tracing() {
