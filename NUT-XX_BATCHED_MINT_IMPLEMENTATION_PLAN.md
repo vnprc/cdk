@@ -14,9 +14,9 @@ This document outlines the implementation plan for NUT-XX (Batched Mint) support
 
 ---
 
-## Phase 1: Mint-Side Implementation
+## Phase 1: Mint-Side Implementation ✅ COMPLETE
 
-### Task 1.1: Design & Data Structures
+### Task 1.1: Design & Data Structures ✅ COMPLETE
 
 **Objective**: Define request/response types matching NUT-XX spec.
 
@@ -50,7 +50,7 @@ This document outlines the implementation plan for NUT-XX (Batched Mint) support
 
 ---
 
-### Task 1.2: Batch Quote Status Endpoint
+### Task 1.2: Batch Quote Status Endpoint ✅ COMPLETE
 
 **Objective**: Implement `POST /v1/mint/{method}/check` endpoint.
 
@@ -118,7 +118,7 @@ Response:
 
 ---
 
-### Task 1.3: Batch Mint Execution Endpoint
+### Task 1.3: Batch Mint Execution Endpoint ✅ COMPLETE
 
 **Objective**: Implement `POST /v1/mint/{method}/batch` endpoint.
 
@@ -193,9 +193,11 @@ Response:
 
 ---
 
-### Task 1.4: Testing (Mint)
+### Task 1.4: Testing (Mint) ✅ COMPLETE
 
 **Objective**: Comprehensive unit and integration tests for batch endpoints.
+
+**Status**: 13 tests passing in `cdk-integration-tests/tests/batch_mint.rs`
 
 **Unit Tests** (in respective `mod.rs` files):
 
@@ -469,13 +471,13 @@ pub async fn mint_batch(
 
 ## Success Criteria
 
-- ✅ All Phase 1 tests pass
-- ✅ All Phase 2 tests pass
-- ✅ Backward compatibility: single mint still works identically
-- ✅ Performance: batch mint 100 quotes < 2x time of single quote
-- ✅ No new security vulnerabilities introduced
-- ✅ Code review approval
-- ✅ NUT-20 support implemented (even if deferred, must be complete)
+- ✅ All Phase 1 tests pass (13/13 tests passing)
+- ⏳ All Phase 2 tests pass
+- ⏳ Backward compatibility: single mint still works identically
+- ⏳ Performance: batch mint 100 quotes < 2x time of single quote
+- ⏳ No new security vulnerabilities introduced
+- ⏳ Code review approval
+- ⏳ NUT-20 support implemented (even if deferred, must be complete)
 
 ---
 
