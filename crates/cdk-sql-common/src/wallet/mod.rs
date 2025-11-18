@@ -477,9 +477,9 @@ ON CONFLICT(mint_url) DO UPDATE SET
         query(
             r#"
 INSERT INTO mint_quote
-(id, mint_url, amount, unit, request, state, expiry, secret_key, payment_method, amount_issued, amount_paid)
+(id, mint_url, amount, unit, request, state, expiry, secret_key, payment_method, amount_issued, amount_paid, spending_condition)
 VALUES
-(:id, :mint_url, :amount, :unit, :request, :state, :expiry, :secret_key, :payment_method, :amount_issued, :amount_paid)
+(:id, :mint_url, :amount, :unit, :request, :state, :expiry, :secret_key, :payment_method, :amount_issued, :amount_paid, :spending_condition)
 ON CONFLICT(id) DO UPDATE SET
     mint_url = excluded.mint_url,
     amount = excluded.amount,
@@ -490,7 +490,8 @@ ON CONFLICT(id) DO UPDATE SET
     secret_key = excluded.secret_key,
     payment_method = excluded.payment_method,
     amount_issued = excluded.amount_issued,
-    amount_paid = excluded.amount_paid
+    amount_paid = excluded.amount_paid,
+    spending_condition = excluded.spending_condition
 ;
         "#,
         )?
@@ -505,6 +506,7 @@ ON CONFLICT(id) DO UPDATE SET
         .bind("payment_method", quote.payment_method.to_string())
         .bind("amount_issued", quote.amount_issued.to_i64())
         .bind("amount_paid", quote.amount_paid.to_i64())
+        .bind("spending_condition", quote.spending_condition.as_deref())
         .execute(&*conn).await?;
 
         Ok(())
@@ -526,7 +528,8 @@ ON CONFLICT(id) DO UPDATE SET
                 secret_key,
                 payment_method,
                 amount_issued,
-                amount_paid
+                amount_paid,
+                spending_condition
             FROM
                 mint_quote
             WHERE
@@ -553,10 +556,11 @@ ON CONFLICT(id) DO UPDATE SET
                 request,
                 state,
                 expiry,
-                secret_key
+                secret_key,
                 payment_method,
                 amount_issued,
-                amount_paid
+                amount_paid,
+                spending_condition
             FROM
                 mint_quote
             "#,
@@ -1175,7 +1179,8 @@ fn sql_row_to_mint_quote(row: Vec<Column>) -> Result<MintQuote, Error> {
             secret_key,
             row_method,
             row_amount_minted,
-            row_amount_paid
+            row_amount_paid,
+            spending_condition
         ) = row
     );
 
@@ -1200,6 +1205,7 @@ fn sql_row_to_mint_quote(row: Vec<Column>) -> Result<MintQuote, Error> {
         payment_method,
         amount_issued: amount_minted.into(),
         amount_paid: amount_paid.into(),
+        spending_condition: column_as_nullable_string!(spending_condition),
     })
 }
 
