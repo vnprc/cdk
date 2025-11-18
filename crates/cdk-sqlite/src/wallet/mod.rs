@@ -178,6 +178,7 @@ mod tests {
                 amount_issued: Amount::from(0),
                 amount_paid: Amount::from(0),
                 keyset_id: None,
+                spending_condition: None,
             };
 
             // Store the quote

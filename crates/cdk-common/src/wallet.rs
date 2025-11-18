@@ -66,6 +66,10 @@ pub struct MintQuote {
     /// Keyset ID associated with the quote
     #[serde(default)]
     pub keyset_id: Option<Id>,
+    /// Spending conditions for NUT-20 locked quotes
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    pub spending_condition: Option<String>,
 }
 
 /// Melt Quote Info
@@ -119,6 +123,7 @@ impl MintQuote {
             amount_issued: Amount::ZERO,
             amount_paid: Amount::ZERO,
             keyset_id,
+            spending_condition: None,
         }
     }
 

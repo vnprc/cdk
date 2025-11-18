@@ -36,6 +36,9 @@ pub struct MintQuote {
     /// Keyset identifier associated with the quote
     #[serde(default)]
     pub keyset_id: Option<String>,
+    /// Spending condition for NUT-20 locked quotes (optional)
+    #[serde(default)]
+    pub spending_condition: Option<String>,
 }
 
 impl From<cdk::wallet::MintQuote> for MintQuote {
@@ -53,6 +56,7 @@ impl From<cdk::wallet::MintQuote> for MintQuote {
             payment_method: quote.payment_method.into(),
             secret_key: quote.secret_key.map(|sk| sk.to_secret_hex()),
             keyset_id: quote.keyset_id.as_ref().map(|id| id.to_string()),
+            spending_condition: quote.spending_condition.clone(),
         }
     }
 }
@@ -86,6 +90,7 @@ impl TryFrom<MintQuote> for cdk::wallet::MintQuote {
             payment_method: quote.payment_method.into(),
             secret_key,
             keyset_id,
+            spending_condition: quote.spending_condition,
         })
     }
 }
