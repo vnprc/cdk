@@ -771,10 +771,11 @@ impl Mint {
                         // Get the pubkey from the quote
                         if let Some(pubkey) = &quote.pubkey {
                             // Create a temporary MintRequest to verify the signature
+                            // Per NUT-20, the signature covers the quote ID and ALL blinded messages
                             // This leverages the existing NUT-20 signature verification logic
                             let mint_req = cdk_common::nuts::MintRequest {
                                 quote: batch_request.quote[i].clone(),
-                                outputs: vec![batch_request.outputs[i].clone()],
+                                outputs: batch_request.outputs.clone(),
                                 signature: Some(sig_str.clone()),
                             };
 
@@ -874,25 +875,24 @@ impl Mint {
 
             let operation = Operation::new_mint();
 
-            // Process each quote with its outputs
+            // Add all blinded messages and signatures together
+            // Quotes are associated by quote_id but outputs are shared across all quotes
+            tx.add_blinded_messages(None, &batch_request.outputs, &operation)
+                .await?;
+
+            tx.add_blind_signatures(
+                &batch_request
+                    .outputs
+                    .iter()
+                    .map(|p| p.blinded_secret)
+                    .collect::<Vec<PublicKey>>(),
+                &blind_signatures,
+                None,
+            )
+            .await?;
+
+            // Update quote amount issued for each quote
             for (i, quote_id) in quote_ids.iter().enumerate() {
-                // Add blinded message for this quote
-                tx.add_blinded_messages(
-                    Some(quote_id),
-                    &[batch_request.outputs[i].clone()],
-                    &operation,
-                )
-                .await?;
-
-                // Add blind signature for this quote
-                tx.add_blind_signatures(
-                    &vec![batch_request.outputs[i].blinded_secret],
-                    &[blind_signatures[i].clone()],
-                    Some(quote_id.clone()),
-                )
-                .await?;
-
-                // Update quote amount issued
                 let quote_amount = match payment_method {
                     PaymentMethod::Bolt11 => tx_quotes[i].amount.ok_or(Error::AmountUndefined)?,
                     PaymentMethod::Bolt12 => tx_quotes[i].amount_mintable(),

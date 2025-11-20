@@ -1177,6 +1177,7 @@ async fn test_wallet_quote_storage_with_nut20_locks() {
 /// the total amount (150 sats) into multiple blinded outputs (~4 outputs via binary split),
 /// but the server's batch handler in `cdk/src/mint/issue/mod.rs` assumes exactly
 /// 1 output per quote (expects 2 outputs for 2 quotes).
+
 #[tokio::test]
 async fn test_batch_mint_mixed_locked_unlocked() {
     setup_tracing();
@@ -1187,139 +1188,14 @@ async fn test_batch_mint_mixed_locked_unlocked() {
         .await
         .expect("Failed to create test wallet");
 
-    // Create paid mint quotes with random IDs
-    use cdk_common::mint::MintQuote as MintMintQuote;
-    use uuid::Uuid;
-
-    let quote_1_id_uuid = Uuid::new_v4();
-    let quote_2_id_uuid = Uuid::new_v4();
-
-    let quote_1_id = quote_1_id_uuid.to_string();
-    let quote_2_id = quote_2_id_uuid.to_string();
-
-    // Create mint quotes (start in unpaid state)
-    // Quote 1: Unlocked (no pubkey)
-    let mint_quote_1 = MintMintQuote::new(
-        Some(quote_1_id_uuid.into()),
-        "lnbc1u...".to_string(),
-        CurrencyUnit::Sat,
-        Some(Amount::from(100)),
-        9999999999,
-        cdk_common::payment::PaymentIdentifier::new("custom", "test_1")
-            .expect("Failed to create payment identifier"),
-        None, // No pubkey = unlocked
-        Amount::ZERO,
-        Amount::ZERO,
-        cdk::nuts::PaymentMethod::Bolt11,
-        0,
-        vec![],
-        vec![],
-    );
-
-    // Quote 2: Locked with a pubkey
+    // Quote 1: Unlocked (None), Quote 2: Locked (Some(secret_key))
     let secret_key_2 = SecretKey::generate();
-    let pubkey_2 = secret_key_2.public_key();
-    let mint_quote_2 = MintMintQuote::new(
-        Some(quote_2_id_uuid.into()),
-        "lnbc500n...".to_string(),
-        CurrencyUnit::Sat,
-        Some(Amount::from(50)),
-        9999999999,
-        cdk_common::payment::PaymentIdentifier::new("custom", "test_2")
-            .expect("Failed to create payment identifier"),
-        Some(pubkey_2), // With pubkey = locked
-        Amount::ZERO,
-        Amount::ZERO,
-        cdk::nuts::PaymentMethod::Bolt11,
-        0,
-        vec![],
-        vec![],
-    );
-
-    // Add directly to mint database and mark as paid
-    let db = mint.localstore();
-    let mut tx = db
-        .begin_transaction()
-        .await
-        .expect("Failed to start transaction");
-    tx.add_mint_quote(mint_quote_1)
-        .await
-        .expect("Failed to add quote 1 to mint");
-    tx.add_mint_quote(mint_quote_2)
-        .await
-        .expect("Failed to add quote 2 to mint");
-    tx.commit().await.expect("Failed to commit transaction");
-
-    // Now mark as paid by incrementing amount_paid via the database transaction
-    let mut tx = db
-        .begin_transaction()
-        .await
-        .expect("Failed to start update transaction");
-    tx.increment_mint_quote_amount_paid(
-        &quote_1_id_uuid.into(),
-        Amount::from(100),
-        "payment_1".to_string(),
-    )
-    .await
-    .expect("Failed to increment q1 amount_paid");
-
-    tx.increment_mint_quote_amount_paid(
-        &quote_2_id_uuid.into(),
-        Amount::from(50),
-        "payment_2".to_string(),
-    )
-    .await
-    .expect("Failed to increment q2 amount_paid");
-    tx.commit()
-        .await
-        .expect("Failed to commit update transaction");
-
-    // Create wallet quotes in PAID state
-    let mut wallet_quote_1 = cdk_common::wallet::MintQuote::new(
-        quote_1_id.clone(),
-        wallet.mint_url.clone(),
-        cdk::nuts::PaymentMethod::Bolt11,
-        Some(Amount::from(100)),
-        CurrencyUnit::Sat,
-        "lnbc1u...".to_string(),
-        9999999999,
-        None,
-    );
-    wallet_quote_1.state = cashu::MintQuoteState::Paid;
-    wallet_quote_1.amount_paid = Amount::from(100);
-
-    let mut wallet_quote_2 = cdk_common::wallet::MintQuote::new(
-        quote_2_id.clone(),
-        wallet.mint_url.clone(),
-        cdk::nuts::PaymentMethod::Bolt11,
-        Some(Amount::from(50)),
-        CurrencyUnit::Sat,
-        "lnbc500n...".to_string(),
-        9999999999,
-        Some(secret_key_2), // Store the secret key for signing
-    );
-    wallet_quote_2.state = cashu::MintQuoteState::Paid;
-    wallet_quote_2.amount_paid = Amount::from(50);
-
-    // Store in wallet
-    wallet
-        .localstore
-        .add_mint_quote(wallet_quote_1)
-        .await
-        .expect("Failed to add quote 1 to wallet");
-    wallet
-        .localstore
-        .add_mint_quote(wallet_quote_2)
-        .await
-        .expect("Failed to add quote 2 to wallet");
+    let (quote_1_id, quote_2_id) =
+        setup_batch_mint_test(&mint, &wallet, [(100, None), (50, Some(secret_key_2))]).await;
 
     // Mint both quotes in a batch
     let proofs = wallet
-        .mint_batch(
-            vec![quote_1_id.clone(), quote_2_id.clone()],
-            SplitTarget::default(),
-            None,
-        )
+        .mint_batch(vec![quote_1_id, quote_2_id], SplitTarget::default(), None)
         .await
         .expect("Failed to mint batch");
 
@@ -1362,121 +1238,9 @@ async fn test_batch_mint_two_unlocked_quotes() {
         .await
         .expect("Failed to create test wallet");
 
-    use cdk_common::mint::MintQuote as MintMintQuote;
-    use uuid::Uuid;
-
-    let quote_1_id_uuid = Uuid::new_v4();
-    let quote_2_id_uuid = Uuid::new_v4();
-
-    let quote_1_id = quote_1_id_uuid.to_string();
-    let quote_2_id = quote_2_id_uuid.to_string();
-
-    // Create two unlocked quotes
-    let mint_quote_1 = MintMintQuote::new(
-        Some(quote_1_id_uuid.into()),
-        "lnbc1u...".to_string(),
-        CurrencyUnit::Sat,
-        Some(Amount::from(100)),
-        9999999999,
-        cdk_common::payment::PaymentIdentifier::new("custom", "test_1")
-            .expect("Failed to create payment identifier"),
-        None, // Unlocked
-        Amount::ZERO,
-        Amount::ZERO,
-        cdk::nuts::PaymentMethod::Bolt11,
-        0,
-        vec![],
-        vec![],
-    );
-
-    let mint_quote_2 = MintMintQuote::new(
-        Some(quote_2_id_uuid.into()),
-        "lnbc500n...".to_string(),
-        CurrencyUnit::Sat,
-        Some(Amount::from(50)),
-        9999999999,
-        cdk_common::payment::PaymentIdentifier::new("custom", "test_2")
-            .expect("Failed to create payment identifier"),
-        None, // Unlocked
-        Amount::ZERO,
-        Amount::ZERO,
-        cdk::nuts::PaymentMethod::Bolt11,
-        0,
-        vec![],
-        vec![],
-    );
-
-    // Add to mint and mark as paid
-    let db = mint.localstore();
-    let mut tx = db
-        .begin_transaction()
-        .await
-        .expect("Failed to start transaction");
-    tx.add_mint_quote(mint_quote_1)
-        .await
-        .expect("Failed to add quote 1");
-    tx.add_mint_quote(mint_quote_2)
-        .await
-        .expect("Failed to add quote 2");
-    tx.commit().await.expect("Failed to commit");
-
-    let mut tx = db
-        .begin_transaction()
-        .await
-        .expect("Failed to start update transaction");
-    tx.increment_mint_quote_amount_paid(
-        &quote_1_id_uuid.into(),
-        Amount::from(100),
-        "payment_1".to_string(),
-    )
-    .await
-    .expect("Failed to increment q1");
-    tx.increment_mint_quote_amount_paid(
-        &quote_2_id_uuid.into(),
-        Amount::from(50),
-        "payment_2".to_string(),
-    )
-    .await
-    .expect("Failed to increment q2");
-    tx.commit().await.expect("Failed to commit update");
-
-    // Create wallet quotes
-    let mut wallet_quote_1 = cdk_common::wallet::MintQuote::new(
-        quote_1_id.clone(),
-        wallet.mint_url.clone(),
-        cdk::nuts::PaymentMethod::Bolt11,
-        Some(Amount::from(100)),
-        CurrencyUnit::Sat,
-        "lnbc1u...".to_string(),
-        9999999999,
-        None,
-    );
-    wallet_quote_1.state = cashu::MintQuoteState::Paid;
-    wallet_quote_1.amount_paid = Amount::from(100);
-
-    let mut wallet_quote_2 = cdk_common::wallet::MintQuote::new(
-        quote_2_id.clone(),
-        wallet.mint_url.clone(),
-        cdk::nuts::PaymentMethod::Bolt11,
-        Some(Amount::from(50)),
-        CurrencyUnit::Sat,
-        "lnbc500n...".to_string(),
-        9999999999,
-        None,
-    );
-    wallet_quote_2.state = cashu::MintQuoteState::Paid;
-    wallet_quote_2.amount_paid = Amount::from(50);
-
-    wallet
-        .localstore
-        .add_mint_quote(wallet_quote_1)
-        .await
-        .expect("Failed to add quote 1 to wallet");
-    wallet
-        .localstore
-        .add_mint_quote(wallet_quote_2)
-        .await
-        .expect("Failed to add quote 2 to wallet");
+    // Both quotes unlocked (None, None)
+    let (quote_1_id, quote_2_id) =
+        setup_batch_mint_test(&mint, &wallet, [(100, None), (50, None)]).await;
 
     // Batch mint
     let proofs = wallet
@@ -1515,127 +1279,15 @@ async fn test_batch_mint_two_locked_quotes() {
         .await
         .expect("Failed to create test wallet");
 
-    use cdk_common::mint::MintQuote as MintMintQuote;
-    use uuid::Uuid;
-
-    let quote_1_id_uuid = Uuid::new_v4();
-    let quote_2_id_uuid = Uuid::new_v4();
-
-    let quote_1_id = quote_1_id_uuid.to_string();
-    let quote_2_id = quote_2_id_uuid.to_string();
-
-    // Create secret keys for locked quotes
+    // Both quotes locked (Some(secret_key), Some(secret_key))
     let secret_key_1 = SecretKey::generate();
-    let pubkey_1 = secret_key_1.public_key();
     let secret_key_2 = SecretKey::generate();
-    let pubkey_2 = secret_key_2.public_key();
-
-    // Create two locked quotes
-    let mint_quote_1 = MintMintQuote::new(
-        Some(quote_1_id_uuid.into()),
-        "lnbc1u...".to_string(),
-        CurrencyUnit::Sat,
-        Some(Amount::from(100)),
-        9999999999,
-        cdk_common::payment::PaymentIdentifier::new("custom", "test_1")
-            .expect("Failed to create payment identifier"),
-        Some(pubkey_1), // Locked with NUT-20
-        Amount::ZERO,
-        Amount::ZERO,
-        cdk::nuts::PaymentMethod::Bolt11,
-        0,
-        vec![],
-        vec![],
-    );
-
-    let mint_quote_2 = MintMintQuote::new(
-        Some(quote_2_id_uuid.into()),
-        "lnbc500n...".to_string(),
-        CurrencyUnit::Sat,
-        Some(Amount::from(50)),
-        9999999999,
-        cdk_common::payment::PaymentIdentifier::new("custom", "test_2")
-            .expect("Failed to create payment identifier"),
-        Some(pubkey_2), // Locked with NUT-20
-        Amount::ZERO,
-        Amount::ZERO,
-        cdk::nuts::PaymentMethod::Bolt11,
-        0,
-        vec![],
-        vec![],
-    );
-
-    // Add to mint and mark as paid
-    let db = mint.localstore();
-    let mut tx = db
-        .begin_transaction()
-        .await
-        .expect("Failed to start transaction");
-    tx.add_mint_quote(mint_quote_1)
-        .await
-        .expect("Failed to add quote 1");
-    tx.add_mint_quote(mint_quote_2)
-        .await
-        .expect("Failed to add quote 2");
-    tx.commit().await.expect("Failed to commit");
-
-    let mut tx = db
-        .begin_transaction()
-        .await
-        .expect("Failed to start update transaction");
-    tx.increment_mint_quote_amount_paid(
-        &quote_1_id_uuid.into(),
-        Amount::from(100),
-        "payment_1".to_string(),
+    let (quote_1_id, quote_2_id) = setup_batch_mint_test(
+        &mint,
+        &wallet,
+        [(100, Some(secret_key_1)), (50, Some(secret_key_2))],
     )
-    .await
-    .expect("Failed to increment q1");
-    tx.increment_mint_quote_amount_paid(
-        &quote_2_id_uuid.into(),
-        Amount::from(50),
-        "payment_2".to_string(),
-    )
-    .await
-    .expect("Failed to increment q2");
-    tx.commit().await.expect("Failed to commit update");
-
-    // Create wallet quotes with secret keys
-    let mut wallet_quote_1 = cdk_common::wallet::MintQuote::new(
-        quote_1_id.clone(),
-        wallet.mint_url.clone(),
-        cdk::nuts::PaymentMethod::Bolt11,
-        Some(Amount::from(100)),
-        CurrencyUnit::Sat,
-        "lnbc1u...".to_string(),
-        9999999999,
-        Some(secret_key_1), // Store secret for signing
-    );
-    wallet_quote_1.state = cashu::MintQuoteState::Paid;
-    wallet_quote_1.amount_paid = Amount::from(100);
-
-    let mut wallet_quote_2 = cdk_common::wallet::MintQuote::new(
-        quote_2_id.clone(),
-        wallet.mint_url.clone(),
-        cdk::nuts::PaymentMethod::Bolt11,
-        Some(Amount::from(50)),
-        CurrencyUnit::Sat,
-        "lnbc500n...".to_string(),
-        9999999999,
-        Some(secret_key_2), // Store secret for signing
-    );
-    wallet_quote_2.state = cashu::MintQuoteState::Paid;
-    wallet_quote_2.amount_paid = Amount::from(50);
-
-    wallet
-        .localstore
-        .add_mint_quote(wallet_quote_1)
-        .await
-        .expect("Failed to add quote 1 to wallet");
-    wallet
-        .localstore
-        .add_mint_quote(wallet_quote_2)
-        .await
-        .expect("Failed to add quote 2 to wallet");
+    .await;
 
     // Batch mint
     let proofs = wallet

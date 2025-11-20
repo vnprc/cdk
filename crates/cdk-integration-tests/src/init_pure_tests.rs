@@ -231,32 +231,8 @@ impl MintConnector for DirectMintConnection {
         &self,
         request: cdk_common::mint::BatchMintRequest,
     ) -> Result<MintResponse, Error> {
-        // Validate all quotes exist and batch is valid
-        let mut quote_ids = Vec::new();
-        for quote_str in &request.quote {
-            let quote_id = QuoteId::from_str(quote_str)?;
-            quote_ids.push(quote_id);
-        }
-
-        // Convert to MintRequest for processing
-        // For batch, we need to process multiple quotes but return signatures in same order
-        let mut all_signatures = Vec::new();
-
-        for (quote_id, output) in quote_ids.iter().zip(&request.outputs) {
-            // Create individual mint request for each quote
-            let mint_req = MintRequest {
-                quote: quote_id.clone(),
-                outputs: vec![output.clone()],
-                signature: None,
-            };
-
-            let response = self.mint.process_mint_request(mint_req).await?;
-            all_signatures.extend(response.signatures);
-        }
-
-        Ok(MintResponse {
-            signatures: all_signatures,
-        })
+        // Process the batch mint request directly using the mint's batch handler
+        self.mint.process_batch_mint_request(request).await
     }
 }
 
@@ -417,4 +393,130 @@ pub async fn fund_wallet(
         .await
         .expect("proofs")?
         .total_amount()?)
+}
+
+/// Helper to set up a batch mint test with two quotes
+/// Returns (quote_1_id, quote_2_id) as strings
+pub async fn setup_batch_mint_test(
+    mint: &Mint,
+    wallet: &Wallet,
+    quote_amounts: [(u64, Option<cashu::SecretKey>); 2],
+) -> (String, String) {
+    use uuid::Uuid;
+
+    let quote_1_id_uuid = Uuid::new_v4();
+    let quote_2_id_uuid = Uuid::new_v4();
+    let quote_1_id = quote_1_id_uuid.to_string();
+    let quote_2_id = quote_2_id_uuid.to_string();
+
+    // Create mint quotes using the same type as the original code
+    use cdk_common::mint::MintQuote as MintMintQuote;
+
+    let mint_quote_1 = MintMintQuote::new(
+        Some(quote_1_id_uuid.into()),
+        "lnbc1u...".to_string(),
+        CurrencyUnit::Sat,
+        Some(Amount::from(quote_amounts[0].0)),
+        9999999999,
+        cdk_common::payment::PaymentIdentifier::new("custom", "test_1")
+            .expect("Failed to create payment identifier"),
+        quote_amounts[0].1.as_ref().map(|sk| sk.public_key()),
+        Amount::ZERO,
+        Amount::ZERO,
+        PaymentMethod::Bolt11,
+        0,
+        vec![],
+        vec![],
+    );
+
+    let mint_quote_2 = MintMintQuote::new(
+        Some(quote_2_id_uuid.into()),
+        "lnbc500n...".to_string(),
+        CurrencyUnit::Sat,
+        Some(Amount::from(quote_amounts[1].0)),
+        9999999999,
+        cdk_common::payment::PaymentIdentifier::new("custom", "test_2")
+            .expect("Failed to create payment identifier"),
+        quote_amounts[1].1.as_ref().map(|sk| sk.public_key()),
+        Amount::ZERO,
+        Amount::ZERO,
+        PaymentMethod::Bolt11,
+        0,
+        vec![],
+        vec![],
+    );
+
+    // Add to mint and mark as paid
+    let db = mint.localstore();
+    let mut tx = db
+        .begin_transaction()
+        .await
+        .expect("Failed to start transaction");
+    tx.add_mint_quote(mint_quote_1)
+        .await
+        .expect("Failed to add quote 1");
+    tx.add_mint_quote(mint_quote_2)
+        .await
+        .expect("Failed to add quote 2");
+    tx.commit().await.expect("Failed to commit");
+
+    let mut tx = db
+        .begin_transaction()
+        .await
+        .expect("Failed to start update transaction");
+    tx.increment_mint_quote_amount_paid(
+        &quote_1_id_uuid.into(),
+        Amount::from(quote_amounts[0].0),
+        "payment_1".to_string(),
+    )
+    .await
+    .expect("Failed to increment q1");
+    tx.increment_mint_quote_amount_paid(
+        &quote_2_id_uuid.into(),
+        Amount::from(quote_amounts[1].0),
+        "payment_2".to_string(),
+    )
+    .await
+    .expect("Failed to increment q2");
+    tx.commit().await.expect("Failed to commit update");
+
+    // Create wallet quotes
+    let mut wallet_quote_1 = cdk_common::wallet::MintQuote::new(
+        quote_1_id.clone(),
+        wallet.mint_url.clone(),
+        PaymentMethod::Bolt11,
+        Some(Amount::from(quote_amounts[0].0)),
+        CurrencyUnit::Sat,
+        "lnbc1u...".to_string(),
+        9999999999,
+        quote_amounts[0].1.clone(),
+    );
+    wallet_quote_1.state = cashu::MintQuoteState::Paid;
+    wallet_quote_1.amount_paid = Amount::from(quote_amounts[0].0);
+
+    let mut wallet_quote_2 = cdk_common::wallet::MintQuote::new(
+        quote_2_id.clone(),
+        wallet.mint_url.clone(),
+        PaymentMethod::Bolt11,
+        Some(Amount::from(quote_amounts[1].0)),
+        CurrencyUnit::Sat,
+        "lnbc500n...".to_string(),
+        9999999999,
+        quote_amounts[1].1.clone(),
+    );
+    wallet_quote_2.state = cashu::MintQuoteState::Paid;
+    wallet_quote_2.amount_paid = Amount::from(quote_amounts[1].0);
+
+    wallet
+        .localstore
+        .add_mint_quote(wallet_quote_1)
+        .await
+        .expect("Failed to add quote 1 to wallet");
+    wallet
+        .localstore
+        .add_mint_quote(wallet_quote_2)
+        .await
+        .expect("Failed to add quote 2 to wallet");
+
+    (quote_1_id, quote_2_id)
 }

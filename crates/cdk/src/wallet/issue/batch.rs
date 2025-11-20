@@ -151,9 +151,10 @@ impl Wallet {
             for (i, quote_info) in quote_infos.iter().enumerate() {
                 if let Some(secret_key) = &quote_info.secret_key {
                     // Generate NUT-20 signature for this quote
+                    // Per NUT-20, the signature covers the quote ID and ALL blinded messages
                     let mut mint_req = cdk_common::nuts::MintRequest {
                         quote: quote_ids[i].clone(),
-                        outputs: vec![blinded_messages[i].clone()],
+                        outputs: blinded_messages.clone(),
                         signature: None,
                     };
 
