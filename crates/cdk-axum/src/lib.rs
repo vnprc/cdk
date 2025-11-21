@@ -315,7 +315,7 @@ pub async fn create_mint_router_with_custom_cache(
         .route("/mint/bolt11", post(cache_post_mint_bolt11))
         .route("/mint/mining_share", post(cache_post_mint_mining_share))
         .route("/mint/bolt11/check", post(cache_post_batch_check_mint))
-        .route("/mint/bolt11/batch", post(cache_post_batch_mint))
+        .route("/mint/:method/batch", post(cache_post_batch_mint))
         .route("/melt/quote/bolt11", post(post_melt_bolt11_quote))
         .route("/ws", get(ws_handler))
         .route(
