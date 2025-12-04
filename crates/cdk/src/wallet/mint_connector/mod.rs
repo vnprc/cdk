@@ -15,7 +15,8 @@ use crate::nuts::{
     CheckStateRequest, CheckStateResponse, Id, KeySet, KeysetResponse, MeltQuoteBolt11Request,
     MeltQuoteBolt11Response, MeltRequest, MintInfo, MintQuoteBolt11Request,
     MintQuoteBolt11Response, MintQuoteMiningShareRequest, MintQuoteMiningShareResponse,
-    MintRequest, MintResponse, RestoreRequest, RestoreResponse, SwapRequest, SwapResponse,
+    MintRequest, MintResponse, PaymentMethod, RestoreRequest, RestoreResponse, SwapRequest,
+    SwapResponse,
 };
 #[cfg(feature = "auth")]
 use crate::wallet::AuthWallet;
@@ -136,7 +137,11 @@ pub trait MintConnector: Debug {
         request: BatchQuoteStatusRequest,
     ) -> Result<BatchQuoteStatusResponse, Error>;
     /// Batch Mint [NUT-XX]
-    async fn post_mint_batch(&self, request: BatchMintRequest) -> Result<MintResponse, Error>;
+    async fn post_mint_batch(
+        &self,
+        request: BatchMintRequest,
+        payment_method: PaymentMethod,
+    ) -> Result<MintResponse, Error>;
 
     /// Mint Quote for Mining Share [NUT-XX]
     async fn post_mint_quote_mining_share(
