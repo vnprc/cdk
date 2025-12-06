@@ -320,11 +320,11 @@ impl Wallet {
 
             let batch_status = self
                 .client
-                .post_mint_batch_quote_status(batch_status_request)
+                .post_mint_batch_quote_status(batch_status_request, payment_method.clone())
                 .await?;
 
             for status in &batch_status.0 {
-                match status.state {
+                match status.state() {
                     MintQuoteState::Paid => (),
                     MintQuoteState::Unpaid => return Err(Error::UnpaidQuote),
                     MintQuoteState::Issued => (),
