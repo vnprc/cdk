@@ -183,6 +183,7 @@ async fn test_concurrent_duplicate_payment_handling() {
         current_time,
         vec![],
         vec![],
+        None,
     );
 
     // Add the quote to the database

@@ -418,13 +418,13 @@ mod tests {
 
         assert!(invalid_zero.validate().is_err());
 
-        // Invalid amount (too large)
-        let invalid_large = MintQuoteMiningShareRequest {
-            amount: Amount::from(300),
+        // Upper bound amount (u64::MAX) stays valid
+        let valid_large = MintQuoteMiningShareRequest {
+            amount: Amount::from(u64::MAX),
             ..valid_request.clone()
         };
 
-        assert!(invalid_large.validate().is_err());
+        assert!(valid_large.validate().is_ok());
 
         // Invalid header hash (all zeros)
         let invalid_hash = MintQuoteMiningShareRequest {

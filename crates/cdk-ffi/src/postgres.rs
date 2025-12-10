@@ -99,8 +99,8 @@ impl WalletDatabase for WalletPostgresDatabase {
         self.inner.get_mint_quotes().await
     }
 
-    async fn get_pending_mint_quotes(&self) -> Result<Vec<MintQuote>, FfiError> {
-        self.inner.get_pending_mint_quotes().await
+    async fn get_unpaid_mint_quotes(&self) -> Result<Vec<MintQuote>, FfiError> {
+        self.inner.get_unpaid_mint_quotes().await
     }
 
     async fn remove_mint_quote(&self, quote_id: String) -> Result<(), FfiError> {

@@ -75,7 +75,7 @@ impl MintPubSubSpec {
                     melt_queries.push(self.db.get_melt_quote(uuid))
                 }
                 NotificationId::MintQuoteMiningShare(uuid) => {
-                    mint_queries.push(self.db.get_mint_quote(uuid))
+                    mint_queries.push(self.get_mint_quote(uuid))
                 }
             }
         }
@@ -103,13 +103,13 @@ impl MintPubSubSpec {
                         quotes
                             .into_iter()
                             .filter_map(|quote| {
-                                quote.and_then(|mint_quotes| match mint_quotes.payment_method {
+                                quote.and_then(|quote| match quote.payment_method {
                                     PaymentMethod::Bolt11 => {
                                         let response: MintQuoteBolt11Response<QuoteId> =
-                                            mint_quotes.into();
+                                            quote.into();
                                         Some(response.into())
                                     }
-                                    PaymentMethod::Bolt12 => match mint_quotes.try_into() {
+                                    PaymentMethod::Bolt12 => match quote.try_into() {
                                         Ok(response) => {
                                             let response: MintQuoteBolt12Response<QuoteId> =
                                                 response;
@@ -118,7 +118,7 @@ impl MintPubSubSpec {
                                         Err(_) => None,
                                     },
                                     PaymentMethod::MiningShare => {
-                                        match MintQuoteMiningShareResponse::try_from(x) {
+                                        match MintQuoteMiningShareResponse::try_from(quote) {
                                             Ok(response) => Some(response.into()),
                                             Err(_) => None,
                                         }

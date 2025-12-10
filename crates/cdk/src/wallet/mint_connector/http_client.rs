@@ -282,7 +282,7 @@ where
 
         #[cfg(feature = "auth")]
         let auth_token = self
-            .get_auth_token(Method::Post, RoutePath::MintQuoteMiningShare)
+            .get_auth_token(Method::Post, RoutePath::MintQuoteBolt11)
             .await?;
 
         #[cfg(not(feature = "auth"))]

@@ -244,43 +244,6 @@ impl MintQuoteMiningShareResponse {
     }
 }
 
-#[uniffi::export]
-impl MintQuoteBolt11Response {
-    /// Get quote ID
-    pub fn quote(&self) -> String {
-        self.quote.clone()
-    }
-
-    /// Get request string
-    pub fn request(&self) -> String {
-        self.request.clone()
-    }
-
-    /// Get state
-    pub fn state(&self) -> QuoteState {
-        self.state.clone()
-    }
-
-    /// Get expiry
-    pub fn expiry(&self) -> Option<u64> {
-        self.expiry
-    }
-
-    /// Get amount
-    pub fn amount(&self) -> Option<Amount> {
-        self.amount
-    }
-
-    /// Get unit
-    pub fn unit(&self) -> Option<CurrencyUnit> {
-        self.unit.clone()
-    }
-
-    /// Get pubkey
-    pub fn pubkey(&self) -> Option<String> {
-        self.pubkey.clone()
-    }
-}
 /// FFI-compatible MeltQuoteBolt11Response
 #[derive(Debug, Clone, Serialize, Deserialize, uniffi::Record)]
 pub struct MeltQuoteBolt11Response {

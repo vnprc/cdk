@@ -350,6 +350,18 @@ impl WalletDatabase for WalletRedbDatabase {
             .collect())
     }
 
+    #[instrument(skip(self))]
+    async fn remove_mint_quote(&self, quote_id: &str) -> Result<(), Self::Err> {
+        let write_txn = self.db.begin_write().map_err(Error::from)?;
+        let mut table = write_txn
+            .open_table(MINT_QUOTES_TABLE)
+            .map_err(Error::from)?;
+        table.remove(quote_id).map_err(Error::from)?;
+        drop(table);
+        write_txn.commit().map_err(Error::from)?;
+        Ok(())
+    }
+
     #[instrument(skip_all)]
     async fn get_melt_quote(&self, quote_id: &str) -> Result<Option<wallet::MeltQuote>, Self::Err> {
         let read_txn = self.db.begin_read().map_err(Error::from)?;

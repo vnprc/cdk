@@ -17,7 +17,7 @@ use async_trait::async_trait;
 use bitcoin::bip32::DerivationPath;
 use cdk_common::database::mint::{validate_kvstore_params, SagaDatabase, SagaTransaction};
 use cdk_common::database::{
-    self, ConversionError, Error, MintDatabase, MintDbWriterFinalizer, MintKeyDatabaseTransaction,
+    self, ConversionError, DbTransactionFinalizer, Error, MintDatabase, MintKeyDatabaseTransaction,
     MintKeysDatabase, MintProofsDatabase, MintQuotesDatabase, MintQuotesTransaction,
     MintSignatureTransaction, MintSignaturesDatabase,
 };
@@ -280,7 +280,7 @@ impl<RM> database::MintTransaction<'_, Error> for SQLTransaction<RM> where RM: D
 {}
 
 #[async_trait]
-impl<RM> MintDbWriterFinalizer for SQLTransaction<RM>
+impl<RM> DbTransactionFinalizer for SQLTransaction<RM>
 where
     RM: DatabasePool + 'static,
 {
@@ -387,11 +387,11 @@ where
         INSERT INTO
             keyset (
                 id, unit, active, valid_from, valid_to, derivation_path,
-                max_order, amounts, input_fee_ppk, derivation_path_index
+                derivation_path_index, amounts, input_fee_ppk
             )
         VALUES (
             :id, :unit, :active, :valid_from, :valid_to, :derivation_path,
-            :max_order, :amounts, :input_fee_ppk, :derivation_path_index
+            :derivation_path_index, :amounts, :input_fee_ppk
         )
         ON CONFLICT(id) DO UPDATE SET
             unit = excluded.unit,
@@ -399,7 +399,6 @@ where
             valid_from = excluded.valid_from,
             valid_to = excluded.valid_to,
             derivation_path = excluded.derivation_path,
-            max_order = excluded.max_order,
             amounts = excluded.amounts,
             input_fee_ppk = excluded.input_fee_ppk,
             derivation_path_index = excluded.derivation_path_index
@@ -411,7 +410,6 @@ where
         .bind("valid_from", keyset.valid_from as i64)
         .bind("valid_to", keyset.final_expiry.map(|v| v as i64))
         .bind("derivation_path", keyset.derivation_path.to_string())
-        .bind("max_order", keyset.max_order)
         .bind("amounts", serde_json::to_string(&keyset.amounts).ok())
         .bind("input_fee_ppk", keyset.input_fee_ppk as i64)
         .bind("derivation_path_index", keyset.derivation_path_index)
@@ -503,7 +501,6 @@ where
                 valid_to,
                 derivation_path,
                 derivation_path_index,
-                max_order,
                 amounts,
                 input_fee_ppk
             FROM
@@ -528,7 +525,6 @@ where
                 valid_to,
                 derivation_path,
                 derivation_path_index,
-                max_order,
                 amounts,
                 input_fee_ppk
             FROM
@@ -1626,6 +1622,32 @@ where
         .into_iter()
         .unzip())
     }
+
+    async fn get_total_redeemed(&self) -> Result<HashMap<Id, Amount>, Self::Err> {
+        let conn = self.pool.get().map_err(|e| Error::Database(Box::new(e)))?;
+        Ok(query(
+            r#"
+            SELECT
+                keyset_id,
+                SUM(amount) AS total
+            FROM
+                proof
+            WHERE
+                state = 'SPENT'
+            GROUP BY keyset_id
+            "#,
+        )?
+        .fetch_all(&*conn)
+        .await?
+        .into_iter()
+        .map(|row| {
+            unpack_into!(let (keyset_id, total) = row);
+            let keyset_id = column_as_string!(keyset_id, Id::from_str);
+            let total: i64 = column_as_number!(total);
+            Ok::<_, Error>((keyset_id, Amount::from(total as u64)))
+        })
+        .collect::<Result<HashMap<_, _>, _>>()?)
+    }
 }
 
 #[async_trait]
@@ -1915,6 +1937,30 @@ where
         .map(sql_row_to_blind_signature)
         .collect::<Result<Vec<BlindSignature>, _>>()?)
     }
+
+    async fn get_total_issued(&self) -> Result<HashMap<Id, Amount>, Self::Err> {
+        let conn = self.pool.get().map_err(|e| Error::Database(Box::new(e)))?;
+        Ok(query(
+            r#"
+            SELECT
+                keyset_id,
+                SUM(amount) AS total
+            FROM
+                blind_signature
+            GROUP BY keyset_id
+            "#,
+        )?
+        .fetch_all(&*conn)
+        .await?
+        .into_iter()
+        .map(|row| {
+            unpack_into!(let (keyset_id, total) = row);
+            let keyset_id = column_as_string!(keyset_id, Id::from_str);
+            let total: i64 = column_as_number!(total);
+            Ok::<_, Error>((keyset_id, Amount::from(total as u64)))
+        })
+        .collect::<Result<HashMap<_, _>, _>>()?)
+    }
 }
 
 #[async_trait]
@@ -2154,6 +2200,7 @@ where
                 state,
                 blinded_secrets,
                 input_ys,
+                quote_id,
                 created_at,
                 updated_at
             FROM
@@ -2182,9 +2229,12 @@ where
         query(
             r#"
             INSERT INTO saga_state
-            (operation_id, operation_kind, state, blinded_secrets, input_ys, created_at, updated_at)
+            (operation_id, operation_kind, state, blinded_secrets, input_ys, quote_id, created_at, updated_at)
             VALUES
-            (:operation_id, :operation_kind, :state, :blinded_secrets, :input_ys, :created_at, :updated_at)
+            (
+                :operation_id, :operation_kind, :state, :blinded_secrets, :input_ys,
+                :quote_id, :created_at, :updated_at
+            )
             "#,
         )?
         .bind("operation_id", saga.operation_id.to_string())
@@ -2192,6 +2242,7 @@ where
         .bind("state", saga.state.state())
         .bind("blinded_secrets", blinded_secrets_json)
         .bind("input_ys", input_ys_json)
+        .bind("quote_id", saga.quote_id.clone())
         .bind("created_at", saga.created_at as i64)
         .bind("updated_at", current_time as i64)
         .execute(&self.inner)
@@ -2258,6 +2309,7 @@ where
                 state,
                 blinded_secrets,
                 input_ys,
+                quote_id,
                 created_at,
                 updated_at
             FROM
@@ -2305,16 +2357,14 @@ fn sql_row_to_keyset_info(row: Vec<Column>) -> Result<MintKeySetInfo, Error> {
             valid_to,
             derivation_path,
             derivation_path_index,
-            max_order,
             amounts,
             row_keyset_ppk
         ) = row
     );
 
-    let max_order: u8 = column_as_number!(max_order);
     let amounts = column_as_nullable_string!(amounts)
         .and_then(|str| serde_json::from_str(&str).ok())
-        .unwrap_or_else(|| (0..max_order).map(|m| 2u64.pow(m.into())).collect());
+        .unwrap_or_default();
 
     Ok(MintKeySetInfo {
         id: column_as_string!(id, Id::from_str, Id::from_bytes),
@@ -2323,7 +2373,6 @@ fn sql_row_to_keyset_info(row: Vec<Column>) -> Result<MintKeySetInfo, Error> {
         valid_from: column_as_number!(valid_from),
         derivation_path: column_as_string!(derivation_path, DerivationPath::from_str),
         derivation_path_index: column_as_nullable_number!(derivation_path_index),
-        max_order,
         amounts,
         input_fee_ppk: column_as_number!(row_keyset_ppk),
         final_expiry: column_as_nullable_number!(valid_to),
@@ -2562,6 +2611,7 @@ fn sql_row_to_saga(row: Vec<Column>) -> Result<mint::Saga, Error> {
             state,
             blinded_secrets,
             input_ys,
+            quote_id,
             created_at,
             updated_at
         ) = row
@@ -2589,6 +2639,7 @@ fn sql_row_to_saga(row: Vec<Column>) -> Result<mint::Saga, Error> {
 
     let created_at: u64 = column_as_number!(created_at);
     let updated_at: u64 = column_as_number!(updated_at);
+    let quote_id = column_as_nullable_string!(quote_id);
 
     Ok(mint::Saga {
         operation_id,
@@ -2596,101 +2647,11 @@ fn sql_row_to_saga(row: Vec<Column>) -> Result<mint::Saga, Error> {
         state,
         blinded_secrets,
         input_ys,
+        quote_id,
         created_at,
         updated_at,
     })
 }
 
 #[cfg(test)]
-mod test {
-    use super::*;
-
-    mod max_order_to_amounts_migrations {
-        use super::*;
-
-        #[test]
-        fn legacy_payload() {
-            let result = sql_row_to_keyset_info(vec![
-                Column::Text("0083a60439303340".to_owned()),
-                Column::Text("sat".to_owned()),
-                Column::Integer(1),
-                Column::Integer(1749844864),
-                Column::Null,
-                Column::Text("0'/0'/0'".to_owned()),
-                Column::Integer(0),
-                Column::Integer(32),
-                Column::Null,
-                Column::Integer(0),
-            ]);
-            assert!(result.is_ok());
-        }
-
-        #[test]
-        fn migrated_payload() {
-            let legacy = sql_row_to_keyset_info(vec![
-                Column::Text("0083a60439303340".to_owned()),
-                Column::Text("sat".to_owned()),
-                Column::Integer(1),
-                Column::Integer(1749844864),
-                Column::Null,
-                Column::Text("0'/0'/0'".to_owned()),
-                Column::Integer(0),
-                Column::Integer(32),
-                Column::Null,
-                Column::Integer(0),
-            ]);
-            assert!(legacy.is_ok());
-
-            let amounts = (0..32).map(|x| 2u64.pow(x)).collect::<Vec<_>>();
-            let migrated = sql_row_to_keyset_info(vec![
-                Column::Text("0083a60439303340".to_owned()),
-                Column::Text("sat".to_owned()),
-                Column::Integer(1),
-                Column::Integer(1749844864),
-                Column::Null,
-                Column::Text("0'/0'/0'".to_owned()),
-                Column::Integer(0),
-                Column::Integer(32),
-                Column::Text(serde_json::to_string(&amounts).expect("valid json")),
-                Column::Integer(0),
-            ]);
-            assert!(migrated.is_ok());
-            assert_eq!(legacy.unwrap(), migrated.unwrap());
-        }
-
-        #[test]
-        fn amounts_over_max_order() {
-            let legacy = sql_row_to_keyset_info(vec![
-                Column::Text("0083a60439303340".to_owned()),
-                Column::Text("sat".to_owned()),
-                Column::Integer(1),
-                Column::Integer(1749844864),
-                Column::Null,
-                Column::Text("0'/0'/0'".to_owned()),
-                Column::Integer(0),
-                Column::Integer(32),
-                Column::Null,
-                Column::Integer(0),
-            ]);
-            assert!(legacy.is_ok());
-
-            let amounts = (0..16).map(|x| 2u64.pow(x)).collect::<Vec<_>>();
-            let migrated = sql_row_to_keyset_info(vec![
-                Column::Text("0083a60439303340".to_owned()),
-                Column::Text("sat".to_owned()),
-                Column::Integer(1),
-                Column::Integer(1749844864),
-                Column::Null,
-                Column::Text("0'/0'/0'".to_owned()),
-                Column::Integer(0),
-                Column::Integer(32),
-                Column::Text(serde_json::to_string(&amounts).expect("valid json")),
-                Column::Integer(0),
-            ]);
-            assert!(migrated.is_ok());
-            let migrated = migrated.unwrap();
-            assert_ne!(legacy.unwrap(), migrated);
-            assert_eq!(migrated.amounts.len(), 16);
-        }
-    }
-}
+mod test {}

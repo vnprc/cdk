@@ -231,9 +231,9 @@ where
         query(
                 r#"
     INSERT INTO mint_quote
-    (id, mint_url, amount, unit, request, state, expiry, secret_key, payment_method, amount_issued, amount_paid)
+    (id, mint_url, amount, unit, request, state, expiry, secret_key, payment_method, amount_issued, amount_paid, keyset_id)
     VALUES
-    (:id, :mint_url, :amount, :unit, :request, :state, :expiry, :secret_key, :payment_method, :amount_issued, :amount_paid)
+    (:id, :mint_url, :amount, :unit, :request, :state, :expiry, :secret_key, :payment_method, :amount_issued, :amount_paid, :keyset_id)
     ON CONFLICT(id) DO UPDATE SET
         mint_url = excluded.mint_url,
         amount = excluded.amount,
@@ -244,7 +244,8 @@ where
         secret_key = excluded.secret_key,
         payment_method = excluded.payment_method,
         amount_issued = excluded.amount_issued,
-        amount_paid = excluded.amount_paid
+        amount_paid = excluded.amount_paid,
+        keyset_id = excluded.keyset_id
     ;
             "#,
             )?
@@ -259,6 +260,7 @@ where
             .bind("payment_method", quote.payment_method.to_string())
             .bind("amount_issued", quote.amount_issued.to_i64())
             .bind("amount_paid", quote.amount_paid.to_i64())
+            .bind("keyset_id", quote.keyset_id.map(|k| k.to_string()))
             .execute(&self.inner).await?;
 
         Ok(())
@@ -680,7 +682,8 @@ where
             secret_key,
             payment_method,
             amount_issued,
-            amount_paid
+            amount_paid,
+            keyset_id
         FROM
             mint_quote
         WHERE
@@ -1032,47 +1035,6 @@ where
         get_keyset_by_id_inner(&*conn, keyset_id, false).await
     }
 
-    #[instrument(skip_all)]
-    async fn add_mint_quote(&self, quote: MintQuote) -> Result<(), Self::Err> {
-        let conn = self.pool.get().map_err(|e| Error::Database(Box::new(e)))?;
-        query(
-            r#"
-INSERT INTO mint_quote
-(id, mint_url, amount, unit, request, state, expiry, secret_key, payment_method, amount_issued, amount_paid, keyset_id)
-VALUES
-(:id, :mint_url, :amount, :unit, :request, :state, :expiry, :secret_key, :payment_method, :amount_issued, :amount_paid, :keyset_id)
-ON CONFLICT(id) DO UPDATE SET
-    mint_url = excluded.mint_url,
-    amount = excluded.amount,
-    unit = excluded.unit,
-    request = excluded.request,
-    state = excluded.state,
-    expiry = excluded.expiry,
-    secret_key = excluded.secret_key,
-    payment_method = excluded.payment_method,
-    amount_issued = excluded.amount_issued,
-    amount_paid = excluded.amount_paid,
-    keyset_id = excluded.keyset_id
-;
-        "#,
-        )?
-        .bind("id", quote.id.to_string())
-        .bind("mint_url", quote.mint_url.to_string())
-        .bind("amount", quote.amount.map(|a| a.to_i64()))
-        .bind("unit", quote.unit.to_string())
-        .bind("request", quote.request)
-        .bind("state", quote.state.to_string())
-        .bind("expiry", quote.expiry as i64)
-        .bind("secret_key", quote.secret_key.map(|p| p.to_string()))
-        .bind("payment_method", quote.payment_method.to_string())
-        .bind("amount_issued", quote.amount_issued.to_i64())
-        .bind("amount_paid", quote.amount_paid.to_i64())
-        .bind("keyset_id", quote.keyset_id.map(|k| k.to_string()))
-        .execute(&*conn).await?;
-
-        Ok(())
-    }
-
     #[instrument(skip(self))]
     async fn get_mint_quote(&self, quote_id: &str) -> Result<Option<MintQuote>, Self::Err> {
         let conn = self.pool.get().map_err(|e| Error::Database(Box::new(e)))?;
@@ -1149,40 +1111,6 @@ ON CONFLICT(id) DO UPDATE SET
             .bind("id", quote_id.to_string())
             .execute(&*conn)
             .await?;
-
-        Ok(())
-    }
-
-    #[instrument(skip_all)]
-    async fn add_melt_quote(&self, quote: wallet::MeltQuote) -> Result<(), Self::Err> {
-        let conn = self.pool.get().map_err(|e| Error::Database(Box::new(e)))?;
-        query(
-            r#"
-INSERT INTO melt_quote
-(id, unit, amount, request, fee_reserve, state, expiry, payment_method)
-VALUES
-(:id, :unit, :amount, :request, :fee_reserve, :state, :expiry, :payment_method)
-ON CONFLICT(id) DO UPDATE SET
-    unit = excluded.unit,
-    amount = excluded.amount,
-    request = excluded.request,
-    fee_reserve = excluded.fee_reserve,
-    state = excluded.state,
-    expiry = excluded.expiry,
-    payment_method = excluded.payment_method
-;
-        "#,
-        )?
-        .bind("id", quote.id.to_string())
-        .bind("unit", quote.unit.to_string())
-        .bind("amount", u64::from(quote.amount) as i64)
-        .bind("request", quote.request)
-        .bind("fee_reserve", u64::from(quote.fee_reserve) as i64)
-        .bind("state", quote.state.to_string())
-        .bind("expiry", quote.expiry as i64)
-        .bind("payment_method", quote.payment_method.to_string())
-        .execute(&*conn)
-        .await?;
 
         Ok(())
     }

@@ -100,17 +100,12 @@ impl WalletDatabase for WalletSqliteDatabase {
         self.inner.get_mint_quotes().await
     }
 
-    async fn get_pending_mint_quotes(&self) -> Result<Vec<MintQuote>, FfiError> {
-        self.inner.get_pending_mint_quotes().await
+    async fn get_unpaid_mint_quotes(&self) -> Result<Vec<MintQuote>, FfiError> {
+        self.inner.get_unpaid_mint_quotes().await
     }
 
     async fn remove_mint_quote(&self, quote_id: String) -> Result<(), FfiError> {
         self.inner.remove_mint_quote(quote_id).await
-    }
-
-    // Melt Quote Management
-    async fn add_melt_quote(&self, quote: MeltQuote) -> Result<(), FfiError> {
-        self.inner.add_melt_quote(quote).await
     }
 
     async fn get_melt_quote(&self, quote_id: String) -> Result<Option<MeltQuote>, FfiError> {

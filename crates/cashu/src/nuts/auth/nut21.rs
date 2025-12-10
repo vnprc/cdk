@@ -371,14 +371,16 @@ mod tests {
             "https://example.com/.well-known/openid-configuration"
         );
         assert_eq!(settings.client_id, "client123");
-        assert_eq!(settings.protected_endpoints.len(), 5); // 3 mint paths + 1 swap path
+        assert_eq!(settings.protected_endpoints.len(), 7); // 6 mint paths + 1 swap path
 
         let expected_protected: HashSet<ProtectedEndpoint> = HashSet::from_iter(vec![
             ProtectedEndpoint::new(Method::Post, RoutePath::Swap),
             ProtectedEndpoint::new(Method::Get, RoutePath::MintBolt11),
             ProtectedEndpoint::new(Method::Get, RoutePath::MintQuoteBolt11),
+            ProtectedEndpoint::new(Method::Get, RoutePath::MintQuoteMiningShare),
             ProtectedEndpoint::new(Method::Get, RoutePath::MintQuoteBolt12),
             ProtectedEndpoint::new(Method::Get, RoutePath::MintBolt12),
+            ProtectedEndpoint::new(Method::Get, RoutePath::MintMiningShare),
         ]);
 
         let deserlized_protected = settings.protected_endpoints.into_iter().collect();

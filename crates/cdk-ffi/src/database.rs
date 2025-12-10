@@ -49,9 +49,6 @@ pub trait WalletDatabase: Send + Sync {
     /// Get mint quotes from storage
     async fn get_mint_quotes(&self) -> Result<Vec<MintQuote>, FfiError>;
 
-    /// Get pending mint quotes from storage (quotes with mintable balance or bolt12 quotes)
-    async fn get_pending_mint_quotes(&self) -> Result<Vec<MintQuote>, FfiError>;
-
     /// Remove mint quote from storage
     async fn remove_mint_quote(&self, quote_id: String) -> Result<(), FfiError>;
 
@@ -1176,10 +1173,10 @@ where
         Ok(result.into_iter().map(|q| q.into()).collect())
     }
 
-    async fn get_pending_mint_quotes(&self) -> Result<Vec<MintQuote>, FfiError> {
+    async fn get_unpaid_mint_quotes(&self) -> Result<Vec<MintQuote>, FfiError> {
         let result = self
             .inner
-            .get_pending_mint_quotes()
+            .get_unpaid_mint_quotes()
             .await
             .map_err(|e| FfiError::Database { msg: e.to_string() })?;
         Ok(result.into_iter().map(|q| q.into()).collect())

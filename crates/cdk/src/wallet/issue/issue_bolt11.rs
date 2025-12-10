@@ -70,6 +70,14 @@ impl Wallet {
 
         let secret_key = SecretKey::generate();
 
+        tracing::debug!(
+            mint_url = %mint_url,
+            amount = %amount,
+            unit = %unit,
+            description_supplied = description.is_some(),
+            "requesting bolt11 mint quote"
+        );
+
         let request = MintQuoteBolt11Request {
             amount,
             unit: unit.clone(),
@@ -89,6 +97,15 @@ impl Wallet {
             quote_res.expiry.unwrap_or(0),
             Some(secret_key),
             None,
+        );
+
+        tracing::debug!(
+            quote_id = %quote.id,
+            mint_url = %quote.mint_url,
+            expiry = quote.expiry,
+            payment_method = ?quote.payment_method,
+            amount = ?quote.amount,
+            "storing mint quote returned by mint"
         );
 
         let mut tx = self.localstore.begin_db_transaction().await?;
@@ -139,7 +156,6 @@ impl Wallet {
                     .mint(&mint_quote.id, SplitTarget::default(), None)
                     .await?;
                 total_amount += proofs.total_amount()?;
-            }
             }
         }
         Ok(total_amount)

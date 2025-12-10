@@ -145,9 +145,7 @@ pub enum NotificationPayload {
     /// Proof state update
     ProofState { proof_states: Vec<ProofStateUpdate> },
     /// Mint quote update
-    MintQuoteUpdate {
-        quote: std::sync::Arc<MintQuoteBolt11Response>,
-    },
+    MintQuoteUpdate { quote: MintQuoteBolt11Response },
     /// Mining-share mint quote update
     MintQuoteMiningShareUpdate {
         quote: std::sync::Arc<MintQuoteMiningShareResponse>,

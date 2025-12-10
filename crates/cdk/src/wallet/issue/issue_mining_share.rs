@@ -46,10 +46,8 @@ impl Wallet {
             num_secrets
         );
 
-        let new_counter = self
-            .localstore
-            .increment_keyset_counter(&keyset_id, num_secrets)
-            .await?;
+        let mut tx = self.localstore.begin_db_transaction().await?;
+        let new_counter = tx.increment_keyset_counter(&keyset_id, num_secrets).await?;
         let count = new_counter - num_secrets;
 
         let premint_secrets = PreMintSecrets::from_seed(
@@ -104,24 +102,25 @@ impl Wallet {
             })
             .collect::<Result<Vec<ProofInfo>, _>>()?;
 
-        self.localstore.update_proofs(proof_infos, vec![]).await?;
+        tx.update_proofs(proof_infos, vec![]).await?;
 
-        self.localstore
-            .add_transaction(Transaction {
-                mint_url: self.mint_url.clone(),
-                direction: TransactionDirection::Incoming,
-                amount: proofs.total_amount()?,
-                fee: Amount::ZERO,
-                unit: self.unit.clone(),
-                ys: proofs.ys()?,
-                timestamp: unix_time(),
-                memo: None,
-                metadata: HashMap::new(),
-                quote_id: Some(quote_id.to_string()),
-                payment_request,
-                payment_proof: None,
-            })
-            .await?;
+        tx.add_transaction(Transaction {
+            mint_url: self.mint_url.clone(),
+            direction: TransactionDirection::Incoming,
+            amount: proofs.total_amount()?,
+            fee: Amount::ZERO,
+            unit: self.unit.clone(),
+            ys: proofs.ys()?,
+            timestamp: unix_time(),
+            memo: None,
+            metadata: HashMap::new(),
+            quote_id: Some(quote_id.to_string()),
+            payment_request,
+            payment_proof: None,
+        })
+        .await?;
+
+        tx.commit().await?;
 
         tracing::debug!(
             "Minted {} mining share proofs for quote {} (amount: {})",
@@ -139,39 +138,78 @@ impl Wallet {
         &self,
         quote_id: &str,
     ) -> Result<MintQuoteMiningShareResponse<String>, Error> {
-        let response = self
+        let response = match self
             .client
             .get_mint_quote_status_mining_share(quote_id)
-            .await?;
-
-        match self.localstore.get_mint_quote(quote_id).await? {
-            Some(mut quote) => {
-                quote.state = response.state.into();
-                quote.keyset_id = Some(response.keyset_id);
-                quote.amount_issued = response.amount_issued;
-                quote.amount_paid = response.amount.unwrap_or(Amount::ZERO);
-                self.localstore.add_mint_quote(quote).await?;
+            .await
+        {
+            Ok(response) => {
+                tracing::debug!(
+                    quote_id,
+                    mint_url = %self.mint_url,
+                    state = %response.state,
+                    amount = ?response.amount,
+                    amount_issued = %response.amount_issued,
+                    keyset_id = %response.keyset_id,
+                    "fetched mining share quote state"
+                );
+                response
             }
-            None => {
-                tracing::info!("Creating local record for mining share quote {}", quote_id);
-
-                let wallet_quote = cdk_common::wallet::MintQuote {
-                    id: quote_id.to_string(),
-                    mint_url: self.mint_url.clone(),
-                    payment_method: cdk_common::PaymentMethod::MiningShare,
-                    amount: response.amount,
-                    unit: response.unit.clone().unwrap_or(self.unit.clone()),
-                    request: response.request.clone(),
-                    state: response.state.into(),
-                    expiry: response.expiry.unwrap_or(0),
-                    secret_key: None,
-                    amount_issued: response.amount_issued,
-                    amount_paid: response.amount.unwrap_or(Amount::ZERO),
-                    keyset_id: Some(response.keyset_id),
-                };
-
-                self.localstore.add_mint_quote(wallet_quote).await?;
+            Err(err) => {
+                tracing::warn!(
+                    quote_id,
+                    mint_url = %self.mint_url,
+                    error = %err,
+                    "failed to fetch mining share quote state"
+                );
+                return Err(err);
             }
+        };
+
+        if let Err(err) = async {
+            let mut tx = self.localstore.begin_db_transaction().await?;
+
+            match tx.get_mint_quote(quote_id).await? {
+                Some(mut quote) => {
+                    quote.state = response.state.into();
+                    quote.keyset_id = Some(response.keyset_id);
+                    quote.amount_issued = response.amount_issued;
+                    quote.amount_paid = response.amount.unwrap_or(Amount::ZERO);
+                    tx.add_mint_quote(quote).await?;
+                }
+                None => {
+                    tracing::info!("Creating local record for mining share quote {}", quote_id);
+
+                    let wallet_quote = cdk_common::wallet::MintQuote {
+                        id: quote_id.to_string(),
+                        mint_url: self.mint_url.clone(),
+                        payment_method: cdk_common::PaymentMethod::MiningShare,
+                        amount: response.amount,
+                        unit: response.unit.clone().unwrap_or(self.unit.clone()),
+                        request: response.request.clone(),
+                        state: response.state.into(),
+                        expiry: response.expiry.unwrap_or(0),
+                        secret_key: None,
+                        amount_issued: response.amount_issued,
+                        amount_paid: response.amount.unwrap_or(Amount::ZERO),
+                        keyset_id: Some(response.keyset_id),
+                    };
+
+                    tx.add_mint_quote(wallet_quote).await?;
+                }
+            }
+
+            tx.commit().await
+        }
+        .await
+        {
+            tracing::error!(
+                quote_id,
+                mint_url = %self.mint_url,
+                error = %err,
+                "failed to persist mining share quote"
+            );
+            return Err(err.into());
         }
 
         Ok(response)

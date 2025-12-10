@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use cdk_common::mint_url::MintUrl;
+use cdk_common::nuts::Id;
 use cdk_common::{Amount, CurrencyUnit, MeltQuoteState, MintQuoteState};
 use redb::{Database, ReadableTable, TableDefinition};
 use serde::{Deserialize, Serialize};
@@ -33,6 +34,8 @@ pub struct V1MintQuote {
     pub request: String,
     pub state: MintQuoteState,
     pub expiry: u64,
+    #[serde(default)]
+    pub keyset_id: Option<Id>,
 }
 
 /// Melt Quote Info
@@ -70,6 +73,7 @@ impl From<V0MintQuote> for V1MintQuote {
             request: quote.request.clone(),
             state,
             expiry: quote.expiry,
+            keyset_id: None,
         }
     }
 }
