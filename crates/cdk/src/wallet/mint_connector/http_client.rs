@@ -814,7 +814,9 @@ where
         let (method_segment, route_path) = match payment_method {
             PaymentMethod::Bolt11 => ("bolt11", RoutePath::MintBolt11),
             PaymentMethod::Bolt12 => ("bolt12", RoutePath::MintBolt12),
-            PaymentMethod::Custom(_) => return Err(Error::UnsupportedPaymentMethod),
+            PaymentMethod::MiningShare | PaymentMethod::Custom(_) => {
+                return Err(Error::UnsupportedPaymentMethod)
+            }
         };
 
         let url = self

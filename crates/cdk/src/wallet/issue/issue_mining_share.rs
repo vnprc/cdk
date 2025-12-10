@@ -193,6 +193,7 @@ impl Wallet {
                         amount_issued: response.amount_issued,
                         amount_paid: response.amount.unwrap_or(Amount::ZERO),
                         keyset_id: Some(response.keyset_id),
+                        spending_condition: None,
                     };
 
                     tx.add_mint_quote(wallet_quote).await?;

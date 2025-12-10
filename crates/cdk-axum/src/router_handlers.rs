@@ -1,5 +1,3 @@
-use std::str::FromStr;
-
 use anyhow::Result;
 use axum::extract::ws::WebSocketUpgrade;
 use axum::extract::{FromRequestParts, Json, Path, State};
@@ -195,7 +193,6 @@ post_cache_wrapper_with_prefer!(
     MeltRequest<QuoteId>,
     MeltQuoteBolt11Response<QuoteId>
 );
-<<<<<<< HEAD
 post_cache_wrapper!(post_mint_mining_share, MintRequest<String>, MintResponse);
 post_cache_wrapper_with_path!(post_batch_mint, String, BatchMintRequest, MintResponse);
 post_cache_wrapper_with_path!(
@@ -889,7 +886,7 @@ pub(crate) async fn post_batch_check_mint(
         let route = match payment_method {
             PaymentMethod::Bolt11 => RoutePath::MintBolt11,
             PaymentMethod::Bolt12 => RoutePath::MintBolt12,
-            PaymentMethod::Custom(_) => unreachable!(),
+            PaymentMethod::MiningShare | PaymentMethod::Custom(_) => unreachable!(),
         };
 
         state
