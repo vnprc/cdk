@@ -67,6 +67,9 @@ pub enum Path {
     /// Bolt12 Batch Mint
     #[serde(rename = "/v1/mint/bolt12/batch")]
     MintBolt12Batch,
+    /// Mining-share Batch Mint
+    #[serde(rename = "/v1/mint/mining_share/batch")]
+    MintMiningShareBatch,
     /// Bolt12 Melt
     #[serde(rename = "/v1/melt/bolt12")]
     MeltBolt12,

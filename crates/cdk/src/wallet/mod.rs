@@ -104,6 +104,28 @@ pub struct Wallet {
     in_error_swap_reverted_proofs: Arc<AtomicBool>,
 }
 
+/// Describes a single mining share quote to include in a batch mint request.
+#[derive(Debug, Clone)]
+pub struct MiningShareBatchEntry {
+    /// Quote identifier to mint
+    pub quote_id: String,
+    /// Amount to mint for this quote
+    pub amount: Amount,
+    /// Keyset identifier that must sign the outputs
+    pub keyset_id: Id,
+}
+
+impl MiningShareBatchEntry {
+    /// Convenience constructor used by callers building batch requests
+    pub fn new(quote_id: String, amount: Amount, keyset_id: Id) -> Self {
+        Self {
+            quote_id,
+            amount,
+            keyset_id,
+        }
+    }
+}
+
 const ALPHANUMERIC: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
 
 /// Wallet Subscription filter

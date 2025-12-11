@@ -856,7 +856,7 @@ pub(crate) async fn post_restore(
     post,
     context_path = "/v1",
     path = "/mint/{method}/check",
-    params(("method" = String, Path, description = "Payment method (bolt11 or bolt12)")),
+    params(("method" = String, Path, description = "Payment method (bolt11, bolt12 or mining_share)")),
     request_body(content = BatchQuoteStatusRequest, description = "Batch quote status params", content_type = "application/json"),
     responses(
         (status = 200, description = "Successful response", body = BatchQuoteStatusResponse, content_type = "application/json"),
@@ -878,6 +878,7 @@ pub(crate) async fn post_batch_check_mint(
     let payment_method = match method.as_str() {
         "bolt11" => PaymentMethod::Bolt11,
         "bolt12" => PaymentMethod::Bolt12,
+        "mining_share" => PaymentMethod::MiningShare,
         _ => return Err(into_response(cdk::error::Error::UnsupportedPaymentMethod)),
     };
 
@@ -886,7 +887,8 @@ pub(crate) async fn post_batch_check_mint(
         let route = match payment_method {
             PaymentMethod::Bolt11 => RoutePath::MintBolt11,
             PaymentMethod::Bolt12 => RoutePath::MintBolt12,
-            PaymentMethod::MiningShare | PaymentMethod::Custom(_) => unreachable!(),
+            PaymentMethod::MiningShare => RoutePath::MintMiningShare,
+            PaymentMethod::Custom(_) => unreachable!(),
         };
 
         state
@@ -995,16 +997,20 @@ pub(crate) async fn post_batch_mint(
     let payment_method = match method.as_str() {
         "bolt11" => PaymentMethod::Bolt11,
         "bolt12" => unimplemented!("Bolt12 batch minting not yet implemented"),
+        "mining_share" => PaymentMethod::MiningShare,
         _ => return Err(into_response(cdk::error::Error::UnsupportedPaymentMethod)),
     };
     #[cfg(feature = "auth")]
     {
+        let route = match payment_method {
+            PaymentMethod::Bolt11 => RoutePath::MintBolt11,
+            PaymentMethod::Bolt12 => RoutePath::MintBolt12,
+            PaymentMethod::MiningShare => RoutePath::MintMiningShare,
+            PaymentMethod::Custom(_) => unreachable!(),
+        };
         state
             .mint
-            .verify_auth(
-                auth.into(),
-                &ProtectedEndpoint::new(Method::Post, RoutePath::MintBolt11),
-            )
+            .verify_auth(auth.into(), &ProtectedEndpoint::new(Method::Post, route))
             .await
             .map_err(into_response)?;
     }
@@ -1031,13 +1037,6 @@ pub(crate) async fn post_batch_mint(
                 "Duplicate quote IDs in request".to_string(),
             )));
         }
-    }
-
-    // Validation: outputs length matches quotes length
-    if payload.outputs.len() != payload.quote.len() {
-        return Err(into_response(cdk::error::Error::Custom(
-            "Outputs count must match quotes count".to_string(),
-        )));
     }
 
     // Validation: signature array (if present) matches quotes length

@@ -891,6 +891,11 @@ impl Mint {
             return Err(Error::BatchCurrencyUnitMismatch);
         }
 
+        let requires_signature = matches!(
+            payment_method,
+            PaymentMethod::Bolt12 | PaymentMethod::MiningShare
+        );
+
         if let Some(signatures) = &batch_request.signature {
             if signatures.len() != quotes.len() {
                 return Err(Error::BatchSignatureCountMismatch);
@@ -911,11 +916,13 @@ impl Mint {
                     } else {
                         return Err(Error::BatchUnexpectedSignature);
                     }
-                } else if quote.pubkey.is_some() && origin == MintRequestOrigin::Single {
+                } else if quote.pubkey.is_some()
+                    && (origin == MintRequestOrigin::Single || requires_signature)
+                {
                     return Err(Error::SignatureMissingOrInvalid);
                 }
             }
-        } else if origin == MintRequestOrigin::Single
+        } else if (origin == MintRequestOrigin::Single || requires_signature)
             && quotes.iter().any(|quote| quote.pubkey.is_some())
         {
             return Err(Error::SignatureMissingOrInvalid);

@@ -175,6 +175,7 @@ where
                 nut19::Path::MeltBolt11 => vec!["v1", "melt", "bolt11"],
                 nut19::Path::MintBolt12 => vec!["v1", "mint", "bolt12"],
                 nut19::Path::MintBolt12Batch => vec!["v1", "mint", "bolt12", "batch"],
+                nut19::Path::MintMiningShareBatch => vec!["v1", "mint", "mining_share", "batch"],
                 nut19::Path::MintQuoteMiningShare => vec!["v1", "mint", "quote", "mining_share"],
 
                 nut19::Path::MeltBolt12 => vec!["v1", "melt", "bolt12"],
@@ -814,9 +815,8 @@ where
         let (method_segment, route_path) = match payment_method {
             PaymentMethod::Bolt11 => ("bolt11", RoutePath::MintBolt11),
             PaymentMethod::Bolt12 => ("bolt12", RoutePath::MintBolt12),
-            PaymentMethod::MiningShare | PaymentMethod::Custom(_) => {
-                return Err(Error::UnsupportedPaymentMethod)
-            }
+            PaymentMethod::MiningShare => ("mining_share", RoutePath::MintMiningShare),
+            PaymentMethod::Custom(_) => return Err(Error::UnsupportedPaymentMethod),
         };
 
         let url = self
@@ -842,9 +842,11 @@ where
         let (nut19_path, auth_route) = match payment_method {
             PaymentMethod::Bolt11 => (nut19::Path::MintBolt11Batch, RoutePath::MintBolt11),
             PaymentMethod::Bolt12 => (nut19::Path::MintBolt12Batch, RoutePath::MintBolt12),
-            PaymentMethod::Custom(_) | PaymentMethod::MiningShare => {
-                return Err(Error::UnsupportedPaymentMethod)
-            }
+            PaymentMethod::MiningShare => (
+                nut19::Path::MintMiningShareBatch,
+                RoutePath::MintMiningShare,
+            ),
+            PaymentMethod::Custom(_) => return Err(Error::UnsupportedPaymentMethod),
         };
 
         #[cfg(feature = "auth")]

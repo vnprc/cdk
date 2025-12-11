@@ -354,6 +354,9 @@ pub enum Error {
     /// Bolt12 batch minting requires a secret key for each quote
     #[error("Bolt12 batch minting requires secret keys for all quotes")]
     BatchBolt12MissingSecretKey,
+    /// Mining share batch minting requires all quotes to share the same keyset
+    #[error("All quotes in mining share batch must use the same keyset")]
+    BatchKeysetMismatch,
 
     /// Custom Error
     #[error("`{0}`")]
