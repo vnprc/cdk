@@ -34,33 +34,10 @@ impl Wallet {
     ) -> Result<Proofs, Error> {
         self.refresh_keysets().await?;
 
-        let fee_and_amounts = self.get_keyset_fees_and_amounts_by_id(keyset_id).await?;
         let quote_record = self.localstore.get_mint_quote(quote_id).await?;
         let payment_request = quote_record.as_ref().map(|quote| quote.request.clone());
 
-        let split_target = SplitTarget::default();
-        let amount_split = amount.split_targeted(&split_target, &fee_and_amounts)?;
-        let num_secrets = amount_split.len() as u32;
-
-        tracing::debug!(
-            "Incrementing keyset {} counter by {}",
-            keyset_id,
-            num_secrets
-        );
-
-        let mut tx = self.localstore.begin_db_transaction().await?;
-        let new_counter = tx.increment_keyset_counter(&keyset_id, num_secrets).await?;
-        tx.commit().await?;
-        let count = new_counter - num_secrets;
-
-        let premint_secrets = PreMintSecrets::from_seed(
-            keyset_id,
-            count,
-            &self.seed,
-            amount,
-            &split_target,
-            &fee_and_amounts,
-        )?;
+        let premint_secrets = self.prepare_premint_secrets(keyset_id, amount).await?;
 
         let mut mint_request = MintRequest {
             quote: quote_id.to_string(),
@@ -71,61 +48,15 @@ impl Wallet {
 
         let mint_response = self.client.post_mint_mining_share(mint_request).await?;
 
-        let keys = self.load_keyset_keys(keyset_id).await?;
-
-        for (signature, premint) in mint_response
-            .signatures
-            .iter()
-            .zip(&premint_secrets.secrets)
-        {
-            let keys = self.load_keyset_keys(signature.keyset_id).await?;
-            let key = keys.amount_key(signature.amount).ok_or(Error::AmountKey)?;
-            match signature.verify_dleq(key, premint.blinded_message.blinded_secret) {
-                Ok(_) | Err(nut12::Error::MissingDleqProof) => (),
-                Err(_) => return Err(Error::CouldNotVerifyDleq),
-            }
-        }
-
-        let proofs = construct_proofs(
-            mint_response.signatures,
-            premint_secrets.rs(),
-            premint_secrets.secrets(),
-            &keys,
-        )?;
-
-        let mut tx = self.localstore.begin_db_transaction().await?;
-
-        let proof_infos = proofs
-            .iter()
-            .map(|proof| {
-                ProofInfo::new(
-                    proof.clone(),
-                    self.mint_url.clone(),
-                    State::Unspent,
-                    self.unit.clone(),
-                )
-            })
-            .collect::<Result<Vec<ProofInfo>, _>>()?;
-
-        tx.update_proofs(proof_infos, vec![]).await?;
-
-        tx.add_transaction(Transaction {
-            mint_url: self.mint_url.clone(),
-            direction: TransactionDirection::Incoming,
-            amount: proofs.total_amount()?,
-            fee: Amount::ZERO,
-            unit: self.unit.clone(),
-            ys: proofs.ys()?,
-            timestamp: unix_time(),
-            memo: None,
-            metadata: HashMap::new(),
-            quote_id: Some(quote_id.to_string()),
-            payment_request,
-            payment_proof: None,
-        })
-        .await?;
-
-        tx.commit().await?;
+        let proofs = self
+            .finalize_mining_share_proofs(
+                mint_response.signatures,
+                premint_secrets,
+                keyset_id,
+                &[quote_id.to_string()],
+                payment_request,
+            )
+            .await?;
 
         tracing::debug!(
             "Minted {} mining share proofs for quote {} (amount: {})",
@@ -167,24 +98,9 @@ impl Wallet {
             return Err(Error::AmountUndefined);
         }
 
-        let fee_and_amounts = self.get_keyset_fees_and_amounts_by_id(keyset_id).await?;
-        let split_target = SplitTarget::default();
-        let amount_split = total_amount.split_targeted(&split_target, &fee_and_amounts)?;
-        let num_secrets = amount_split.len() as u32;
-
-        let mut tx = self.localstore.begin_db_transaction().await?;
-        let new_counter = tx.increment_keyset_counter(&keyset_id, num_secrets).await?;
-        tx.commit().await?;
-        let count = new_counter - num_secrets;
-
-        let premint_secrets = PreMintSecrets::from_seed(
-            keyset_id,
-            count,
-            &self.seed,
-            total_amount,
-            &split_target,
-            &fee_and_amounts,
-        )?;
+        let premint_secrets = self
+            .prepare_premint_secrets(keyset_id, total_amount)
+            .await?;
 
         let blinded_messages = premint_secrets.blinded_messages();
         let mut batch_signatures = Vec::with_capacity(quotes.len());
@@ -211,68 +127,19 @@ impl Wallet {
             .post_mint_batch(batch_request, PaymentMethod::MiningShare)
             .await?;
 
-        for (signature, premint) in mint_response
-            .signatures
-            .iter()
-            .zip(&premint_secrets.secrets)
-        {
-            let keys = self.load_keyset_keys(signature.keyset_id).await?;
-            let key = keys.amount_key(signature.amount).ok_or(Error::AmountKey)?;
-            match signature.verify_dleq(key, premint.blinded_message.blinded_secret) {
-                Ok(_) | Err(nut12::Error::MissingDleqProof) => (),
-                Err(_) => return Err(Error::CouldNotVerifyDleq),
-            }
-        }
-
-        let active_keys = self.load_keyset_keys(keyset_id).await?;
-        let proofs = construct_proofs(
-            mint_response.signatures,
-            premint_secrets.rs(),
-            premint_secrets.secrets(),
-            &active_keys,
-        )?;
-
-        let mut tx = self.localstore.begin_db_transaction().await?;
-
-        let proof_infos = proofs
-            .iter()
-            .map(|proof| {
-                ProofInfo::new(
-                    proof.clone(),
-                    self.mint_url.clone(),
-                    State::Unspent,
-                    self.unit.clone(),
-                )
-            })
-            .collect::<Result<Vec<ProofInfo>, _>>()?;
-
-        tx.update_proofs(proof_infos, vec![]).await?;
-
-        let batch_ids = quote_ids.join(",");
-        let payment_request = match tx.get_mint_quote(&quote_ids[0]).await? {
+        let payment_request = match self.localstore.get_mint_quote(&quote_ids[0]).await? {
             Some(quote) => Some(quote.request),
             None => None,
         };
 
-        tx.add_transaction(Transaction {
-            mint_url: self.mint_url.clone(),
-            direction: TransactionDirection::Incoming,
-            amount: proofs.total_amount()?,
-            fee: Amount::ZERO,
-            unit: self.unit.clone(),
-            ys: proofs.ys()?,
-            timestamp: unix_time(),
-            memo: None,
-            metadata: HashMap::new(),
-            quote_id: Some(batch_ids),
+        self.finalize_mining_share_proofs(
+            mint_response.signatures,
+            premint_secrets,
+            keyset_id,
+            &quote_ids,
             payment_request,
-            payment_proof: None,
-        })
-        .await?;
-
-        tx.commit().await?;
-
-        Ok(proofs)
+        )
+        .await
     }
 
     /// Fetch the latest state for a mining share quote and persist it locally.
@@ -357,5 +224,110 @@ impl Wallet {
         }
 
         Ok(response)
+    }
+
+    /// Helper to prepare premint secrets for a given amount and keyset.
+    ///
+    /// This handles keyset fee/amount retrieval, amount splitting, counter increment,
+    /// and PreMintSecrets creation.
+    async fn prepare_premint_secrets(
+        &self,
+        keyset_id: crate::nuts::Id,
+        amount: Amount,
+    ) -> Result<PreMintSecrets, Error> {
+        let fee_and_amounts = self.get_keyset_fees_and_amounts_by_id(keyset_id).await?;
+        let split_target = SplitTarget::default();
+        let amount_split = amount.split_targeted(&split_target, &fee_and_amounts)?;
+        let num_secrets = amount_split.len() as u32;
+
+        tracing::debug!(
+            "Incrementing keyset {} counter by {}",
+            keyset_id,
+            num_secrets
+        );
+
+        let mut tx = self.localstore.begin_db_transaction().await?;
+        let new_counter = tx.increment_keyset_counter(&keyset_id, num_secrets).await?;
+        tx.commit().await?;
+        let count = new_counter - num_secrets;
+
+        Ok(PreMintSecrets::from_seed(
+            keyset_id,
+            count,
+            &self.seed,
+            amount,
+            &split_target,
+            &fee_and_amounts,
+        )?)
+    }
+
+    /// Helper to verify DLEQ proofs, construct proofs, and store them.
+    ///
+    /// This handles DLEQ verification, proof construction from signatures,
+    /// proof storage, and transaction recording.
+    async fn finalize_mining_share_proofs(
+        &self,
+        signatures: Vec<cdk_common::nuts::BlindSignature>,
+        premint_secrets: PreMintSecrets,
+        keyset_id: crate::nuts::Id,
+        quote_ids: &[String],
+        payment_request: Option<String>,
+    ) -> Result<Proofs, Error> {
+        // Verify DLEQ proofs
+        for (signature, premint) in signatures.iter().zip(&premint_secrets.secrets) {
+            let keys = self.load_keyset_keys(signature.keyset_id).await?;
+            let key = keys.amount_key(signature.amount).ok_or(Error::AmountKey)?;
+            match signature.verify_dleq(key, premint.blinded_message.blinded_secret) {
+                Ok(_) | Err(nut12::Error::MissingDleqProof) => (),
+                Err(_) => return Err(Error::CouldNotVerifyDleq),
+            }
+        }
+
+        // Construct proofs from signatures
+        let keys = self.load_keyset_keys(keyset_id).await?;
+        let proofs = construct_proofs(
+            signatures,
+            premint_secrets.rs(),
+            premint_secrets.secrets(),
+            &keys,
+        )?;
+
+        // Store proofs and create transaction
+        let mut tx = self.localstore.begin_db_transaction().await?;
+
+        let proof_infos = proofs
+            .iter()
+            .map(|proof| {
+                ProofInfo::new(
+                    proof.clone(),
+                    self.mint_url.clone(),
+                    State::Unspent,
+                    self.unit.clone(),
+                )
+            })
+            .collect::<Result<Vec<ProofInfo>, _>>()?;
+
+        tx.update_proofs(proof_infos, vec![]).await?;
+
+        let batch_ids = quote_ids.join(",");
+        tx.add_transaction(Transaction {
+            mint_url: self.mint_url.clone(),
+            direction: TransactionDirection::Incoming,
+            amount: proofs.total_amount()?,
+            fee: Amount::ZERO,
+            unit: self.unit.clone(),
+            ys: proofs.ys()?,
+            timestamp: unix_time(),
+            memo: None,
+            metadata: HashMap::new(),
+            quote_id: Some(batch_ids),
+            payment_request,
+            payment_proof: None,
+        })
+        .await?;
+
+        tx.commit().await?;
+
+        Ok(proofs)
     }
 }
