@@ -1,10 +1,10 @@
 use bitcoin::hashes::sha256;
+use cdk::nuts::nut04::{MintQuoteCustomRequest, MintQuoteCustomResponse};
 use cdk::nuts::{CurrencyUnit, Id, MintQuoteState, PublicKey};
 use cdk::Amount;
-use cdk_common::nuts::nutXX::MintQuoteMiningShareRequest;
-use cdk_common::nuts::nutXX::MintQuoteMiningShareResponse;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::str::FromStr;
 use thiserror::Error;
 
@@ -49,11 +49,19 @@ pub struct EhashQuoteResponse<Q> {
     /// Unix timestamp until which the quote is valid.
     pub expiry: Option<u64>,
     /// Pubkey for NUT-20.
-    pub pubkey: PublicKey,
-    /// Keyset ID for this quote.
-    pub keyset_id: Id,
-    /// Amount issued for this quote.
-    pub amount_issued: Amount,
+    pub pubkey: Option<PublicKey>,
+    /// Keyset ID for this quote (optional).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keyset_id: Option<Id>,
+    /// Amount issued for this quote (optional).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub amount_issued: Option<Amount>,
+    /// Optional share height metadata.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub share_height: Option<u64>,
+    /// Optional pool identifier metadata.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pool_id: Option<String>,
 }
 
 impl<Q: ToString> EhashQuoteResponse<Q> {
@@ -69,6 +77,8 @@ impl<Q: ToString> EhashQuoteResponse<Q> {
             pubkey: self.pubkey,
             keyset_id: self.keyset_id,
             amount_issued: self.amount_issued,
+            share_height: self.share_height,
+            pool_id: self.pool_id.clone(),
         }
     }
 }
@@ -99,40 +109,47 @@ fn parse_header_hash(header_hash: &str) -> Result<sha256::Hash, EhashError> {
     sha256::Hash::from_str(header_hash).map_err(|_| EhashError::InvalidHeaderHash)
 }
 
-impl TryFrom<EhashQuoteRequest> for MintQuoteMiningShareRequest {
+fn read_extra<T: DeserializeOwned>(extra: &Value, key: &str) -> Option<T> {
+    extra
+        .get(key)
+        .cloned()
+        .and_then(|value| serde_json::from_value(value).ok())
+}
+
+impl TryFrom<EhashQuoteRequest> for MintQuoteCustomRequest {
     type Error = EhashError;
 
     fn try_from(value: EhashQuoteRequest) -> Result<Self, Self::Error> {
         let header_hash = parse_header_hash(&value.header_hash)?;
 
-        Ok(MintQuoteMiningShareRequest {
+        Ok(MintQuoteCustomRequest {
             amount: value.amount,
             unit: value.unit,
-            header_hash,
             description: value.description,
-            pubkey: value.pubkey,
+            pubkey: Some(value.pubkey),
+            extra: serde_json::json!({
+                "header_hash": header_hash.to_string(),
+            }),
         })
     }
 }
 
-impl<Q> From<MintQuoteMiningShareResponse<Q>> for EhashQuoteResponse<Q> {
-    fn from(value: MintQuoteMiningShareResponse<Q>) -> Self {
-        let state = match value.state {
-            cdk_common::nuts::nutXX::QuoteState::Unpaid => MintQuoteState::Unpaid,
-            cdk_common::nuts::nutXX::QuoteState::Paid => MintQuoteState::Paid,
-            cdk_common::nuts::nutXX::QuoteState::Issued => MintQuoteState::Issued,
-        };
+impl<Q> From<MintQuoteCustomResponse<Q>> for EhashQuoteResponse<Q> {
+    fn from(value: MintQuoteCustomResponse<Q>) -> Self {
+        let extra = value.extra.clone();
 
         Self {
             quote: value.quote,
             request: value.request,
             amount: value.amount,
             unit: value.unit,
-            state,
+            state: value.state,
             expiry: value.expiry,
             pubkey: value.pubkey,
-            keyset_id: value.keyset_id,
-            amount_issued: value.amount_issued,
+            keyset_id: read_extra(&extra, "keyset_id"),
+            amount_issued: read_extra(&extra, "amount_issued"),
+            share_height: read_extra(&extra, "share_height"),
+            pool_id: read_extra(&extra, "pool_id"),
         }
     }
 }
@@ -150,30 +167,38 @@ mod tests {
     }
 
     #[test]
-    fn mining_share_conversion_sets_state() {
+    fn custom_quote_conversion_sets_state() {
         let secret = bitcoin::secp256k1::SecretKey::from_slice(&[1u8; 32]).unwrap();
         let secp_pubkey = bitcoin::secp256k1::PublicKey::from_secret_key(&cdk::SECP256K1, &secret);
         let pubkey = PublicKey::from_slice(&secp_pubkey.serialize()).unwrap();
         let keyset_id = Id::from_bytes(&[0u8; 8]).unwrap();
 
-        let response = MintQuoteMiningShareResponse {
+        let response = MintQuoteCustomResponse {
             quote: "quote-id".to_string(),
             request: "aa".to_string(),
             amount: Some(Amount::from(1)),
             unit: Some(CurrencyUnit::custom("EHASH")),
-            state: cdk_common::nuts::nutXX::QuoteState::Paid,
+            state: MintQuoteState::Paid,
             expiry: Some(1),
-            pubkey,
-            keyset_id,
-            amount_issued: Amount::ZERO,
+            pubkey: Some(pubkey),
+            extra: serde_json::json!({
+                "keyset_id": keyset_id,
+                "amount_issued": Amount::ZERO,
+                "share_height": 100u64,
+                "pool_id": "pool-1",
+            }),
         };
 
         let converted: EhashQuoteResponse<String> = response.into();
         assert_eq!(converted.state, MintQuoteState::Paid);
+        assert_eq!(converted.keyset_id, Some(keyset_id));
+        assert_eq!(converted.amount_issued, Some(Amount::ZERO));
+        assert_eq!(converted.share_height, Some(100));
+        assert_eq!(converted.pool_id, Some("pool-1".to_string()));
     }
 
     #[test]
-    fn ehash_request_converts_to_mining_share() {
+    fn ehash_request_converts_to_custom() {
         let secret = bitcoin::secp256k1::SecretKey::from_slice(&[1u8; 32]).unwrap();
         let secp_pubkey = bitcoin::secp256k1::PublicKey::from_secret_key(&cdk::SECP256K1, &secret);
         let pubkey = PublicKey::from_slice(&secp_pubkey.serialize()).unwrap();
@@ -187,7 +212,10 @@ mod tests {
             pubkey,
         };
 
-        let mining_request = MintQuoteMiningShareRequest::try_from(request).unwrap();
-        assert_eq!(mining_request.header_hash.to_string(), header_hash);
+        let custom_request = MintQuoteCustomRequest::try_from(request).unwrap();
+        assert_eq!(
+            custom_request.extra.get("header_hash").unwrap().as_str().unwrap(),
+            header_hash
+        );
     }
 }

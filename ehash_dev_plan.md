@@ -206,3 +206,14 @@ This shrinks the fork diff to just the new crate + wiring + generic custom-metho
 5. Add auth handling for custom routes.
 6. Update `cdk-ehash` to use custom method (drop mining-share dependency).
 7. Remove NUT-XX/mining-share artifacts from fork.
+
+---
+
+## Status (2026-03-13)
+
+Phase 1:
+- Completed: 1–7. `cdk-ehash` crate is in workspace, endpoints and wallet helpers exist, tests added, and the work is rebased onto `origin/main`.
+
+Phase 2:
+- Already present in `main`: 1–5 (custom mint request/response with `extra`, custom-method routing, `MintQuoteRequest/Response` variants, generic mint connector, auth handling).
+- Completed in this branch: 6–7 (ehash now uses custom-method flow; mining-share/NUT-XX references removed from ehash).

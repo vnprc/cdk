@@ -415,6 +415,12 @@ pub struct FakeWallet {
     pub max_delay_time: u64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct Ehash {
+    #[serde(default)]
+    pub enabled: bool,
+}
+
 #[cfg(feature = "fakewallet")]
 impl Default for FakeWallet {
     fn default() -> Self {
@@ -615,6 +621,8 @@ pub struct Settings {
     /// Transaction limits for DoS protection
     #[serde(default)]
     pub limits: Limits,
+    #[serde(default)]
+    pub ehash: Ehash,
     #[cfg(feature = "cln")]
     pub cln: Option<Cln>,
     #[cfg(feature = "lnbits")]

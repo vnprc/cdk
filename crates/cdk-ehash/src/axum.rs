@@ -9,9 +9,8 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use cdk::error::{ErrorCode, ErrorResponse};
-use cdk::mint::Mint;
-use cdk::nuts::{MintRequest, MintResponse, PaymentMethod};
-use cdk_common::mint::BatchMintRequest;
+use cdk::mint::{Mint, MintInput};
+use cdk::nuts::{BatchMintRequest, MintRequest, MintResponse};
 use cdk_common::quote_id::QuoteId;
 use tracing::instrument;
 
@@ -73,26 +72,11 @@ async fn get_mint_ehash_quote(
 #[instrument(skip_all, fields(quote_id = %payload.quote))]
 async fn post_mint_ehash(
     State(state): State<EhashState>,
-    Json(payload): Json<MintRequest<String>>,
+    Json(payload): Json<MintRequest<QuoteId>>,
 ) -> Result<Json<MintResponse>, Response> {
-    let MintRequest {
-        quote,
-        outputs,
-        signature,
-    } = payload;
-
-    let quote = QuoteId::from_str(&quote)
-        .map_err(|_| (StatusCode::BAD_REQUEST, "Invalid quote ID").into_response())?;
-
-    let request = MintRequest {
-        quote,
-        outputs,
-        signature,
-    };
-
     let response = state
         .mint
-        .process_mint_request(request)
+        .process_mint_request(MintInput::Single(payload))
         .await
         .map_err(into_response)?;
 
@@ -102,11 +86,11 @@ async fn post_mint_ehash(
 #[instrument(skip_all, fields(quote_count = ?payload.quote.len()))]
 async fn post_mint_ehash_batch(
     State(state): State<EhashState>,
-    Json(payload): Json<BatchMintRequest>,
+    Json(payload): Json<BatchMintRequest<QuoteId>>,
 ) -> Result<Json<MintResponse>, Response> {
     let response = state
         .mint
-        .process_batch_mint_request(payload, PaymentMethod::MiningShare)
+        .process_mint_request(MintInput::Batch(payload))
         .await
         .map_err(into_response)?;
 

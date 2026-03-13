@@ -37,7 +37,7 @@ use cdk::nuts::{
     AuthRequired, ContactInfo, Method, MintVersion, PaymentMethod, ProtectedEndpoint, RoutePath,
 };
 use cdk_axum::cache::HttpCache;
-use cdk_ehash::axum::create_ehash_router;
+use cdk_ehash::EhashPaymentProcessor;
 use cdk_common::common::QuoteTTL;
 use cdk_common::database::DynMintDatabase;
 // internal crate modules
@@ -617,6 +617,22 @@ async fn configure_lightning_backend(
         }
     };
 
+    if settings.ehash.enabled {
+        let ehash_unit = CurrencyUnit::custom("EHASH");
+        let ehash = EhashPaymentProcessor::new(ehash_unit.clone());
+        #[cfg(feature = "prometheus")]
+        let ehash = MetricsMintPayment::new(ehash);
+
+        mint_builder = configure_backend_for_unit(
+            settings,
+            mint_builder,
+            ehash_unit,
+            mint_melt_limits,
+            Arc::new(ehash),
+        )
+        .await?;
+    }
+
     Ok(mint_builder)
 }
 
@@ -1174,11 +1190,8 @@ async fn start_services_with_shutdown(
         cdk_axum::create_mint_router_with_custom_cache(Arc::clone(&mint), cache, custom_methods)
             .await?;
 
-    let ehash_router = create_ehash_router(Arc::clone(&mint));
-
     let mut mint_service = Router::new()
         .merge(v1_service)
-        .merge(ehash_router)
         .layer(
             ServiceBuilder::new()
                 .layer(RequestDecompressionLayer::new())

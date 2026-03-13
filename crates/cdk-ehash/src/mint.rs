@@ -1,14 +1,13 @@
 //! Mint-side helpers for ehash.
 
 use cdk::error::Error;
-use cdk::mint::Mint;
+use cdk::mint::{Mint, MintQuoteRequest, MintQuoteResponse};
 use cdk::nuts::CurrencyUnit;
-use cdk_common::nuts::nutXX::MintQuoteMiningShareResponse;
 use cdk_common::quote_id::QuoteId;
 
 use crate::types::{EhashError, EhashQuoteRequest, EhashQuoteResponse};
 
-/// Create a new ehash quote using the mining-share mint flow.
+/// Create a new ehash quote using the custom payment method flow.
 pub async fn create_ehash_quote(
     mint: &Mint,
     request: EhashQuoteRequest,
@@ -17,14 +16,21 @@ pub async fn create_ehash_quote(
         return Err(Error::UnsupportedUnit);
     }
 
-    let mining_request = request
+    let custom_request = request
         .try_into()
         .map_err(|_err: EhashError| Error::InvalidPaymentRequest)?;
 
-    let quote = mint.create_mint_mining_share_quote(mining_request).await?;
-    let mining_response: MintQuoteMiningShareResponse<QuoteId> = quote.try_into()?;
+    let response = mint
+        .get_mint_quote(MintQuoteRequest::Custom {
+            method: "ehash".to_string(),
+            request: custom_request,
+        })
+        .await?;
 
-    Ok(mining_response.into())
+    match response {
+        MintQuoteResponse::Custom { response, .. } => Ok(response.into()),
+        _ => Err(Error::InvalidPaymentMethod),
+    }
 }
 
 /// Fetch an ehash quote by ID if it exists.
@@ -32,6 +38,12 @@ pub async fn get_ehash_quote(
     mint: &Mint,
     quote_id: &QuoteId,
 ) -> Result<Option<EhashQuoteResponse<QuoteId>>, Error> {
-    let maybe_quote = mint.get_mint_mining_share_quote(quote_id).await?;
-    Ok(maybe_quote.map(Into::into))
+    let response = mint.check_mint_quote(quote_id).await?;
+
+    match response {
+        MintQuoteResponse::Custom { method, response } if method == "ehash" => {
+            Ok(Some(response.into()))
+        }
+        _ => Ok(None),
+    }
 }

@@ -2,9 +2,8 @@
 
 use cdk::error::Error;
 use cdk::mint_url::MintUrl;
-use cdk::nuts::{MintRequest, MintResponse};
+use cdk::nuts::{BatchMintRequest, MintRequest, MintResponse};
 use cdk::wallet::mint_connector::transport::Transport;
-use cdk_common::mint::BatchMintRequest;
 use cdk_common::quote_id::QuoteId;
 
 use crate::types::{EhashQuoteRequest, EhashQuoteResponse};
@@ -65,7 +64,10 @@ where
     }
 
     /// Batch mint tokens for ehash quotes.
-    pub async fn batch_mint_ehash(&self, request: BatchMintRequest) -> Result<MintResponse, Error> {
+    pub async fn batch_mint_ehash(
+        &self,
+        request: BatchMintRequest<String>,
+    ) -> Result<MintResponse, Error> {
         let url = self
             .mint_url
             .join_paths(&["v1", "mint", "ehash", "batch"])?;
