@@ -47,6 +47,7 @@ cdk-lnbits = { workspace = true, optional = true }
 cdk-lnd = { workspace = true, optional = true }
 cdk-ldk-node = { workspace = true, optional = true }
 cdk-fake-wallet = { workspace = true, optional = true }
+cdk-ehash.workspace = true
 cdk-axum.workspace = true
 cdk-signatory.workspace = true
 cdk-mint-rpc = { workspace = true, optional = true }

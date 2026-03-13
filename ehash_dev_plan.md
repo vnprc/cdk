@@ -3,14 +3,22 @@
 This plan assumes:
 - No NUT-XX terminology or spec updates.
 - Batched minting is already in `main`.
-- We minimize fork diffs by using **custom payment methods**, **custom units**, and **custom request/response extras** already supported in `main`.
+- We minimize fork diffs by using **custom payment methods**, **custom units**, and **custom request/response extras** supported in `main`.
 
 ---
 
-## 1) Baseline + Branch Strategy
+## 1) Baseline + Branch Strategy (Phased)
 
-- Create a fresh branch from `origin/main` (e.g., `ehash-extract`).
-- Keep `hashpool-batched-minting` only as a reference for mining-share logic to transplant.
+**Decision (Phase 1 first):**
+1. Implement a minimal `cdk-ehash` crate that exposes ehash endpoints **backed by the existing mining-share flow** (no core changes).
+2. Commit and re-apply/cherry-pick onto a fresh branch from `origin/main`.
+3. Verify full stack on latest `main` before Phase 2.
+
+**Why:** small diff, low conflict surface, and lets us validate behavior on up-to-date `main` quickly.
+
+**Branch instructions (Phase 1):**
+- Create a fresh branch from `origin/main` (e.g., `ehash-phase1`).
+- Keep the old fork only as a reference for mining-share logic to transplant.
 - Target near‑zero diffs in core crates (`cashu`, `cdk`, `cdk-common`, `cdk-axum`, `cdk-ffi`, `cdk-sql-common`).
 
 ---
@@ -40,9 +48,9 @@ crates/cdk-ehash/
   src/
     lib.rs
     types.rs           // request/response structs, extra JSON parsing
-    mint.rs            // payment processor + mint‑side helpers
+    mint.rs            // mint‑side helpers
     wallet.rs          // wallet helpers + batch mint convenience
-    axum.rs            // optional: only if you later want custom extra handlers
+    axum.rs            // ehash routes
     ffi.rs (optional)  // separate FFI surface if needed
 ```
 
@@ -54,79 +62,82 @@ crates/cdk-ehash/
 - Handle `extra` JSON packing/unpacking.
 
 ### `mint.rs`
-- Implement `EhashPaymentProcessor: MintPayment`.
-- Provide `EhashMintConfig` + `build_ehash_processor(...)`.
+- Provide mint‑side helpers that map to the underlying quote logic.
 
 ### `wallet.rs`
-- Helpers wrapping `MintConnector`:
-  - `create_ehash_quote(...) -> MintQuoteCustomResponse`
+- Helpers wrapping mint HTTP:
+  - `create_ehash_quote(...)`
   - `check_ehash_quote(...)`
   - `mint_ehash(...)`
-  - `batch_mint_ehash(...)` (uses batch mint endpoint on `main`)
+  - `batch_mint_ehash(...)`
 - Add batch validation for matching `keyset_id` in `extra` if required.
 
-### `axum.rs` (optional)
-- Do **not** keep legacy `/mint/quote/mining_share` routes.
-- Rely solely on existing custom routes:
+### `axum.rs`
+- Provide ehash endpoints:
   - `POST /v1/mint/quote/ehash`
   - `GET /v1/mint/quote/ehash/{id}`
   - `POST /v1/mint/ehash`
   - `POST /v1/mint/ehash/batch`
+- **Phase 1:** these endpoints delegate to mining‑share logic to keep core untouched.
+- **Phase 2:** these endpoints use custom-method core handling (no mining‑share).
 
 ---
 
-## 4) Mint Payment Processor Design (No Core Changes)
+## 4) Phase 2: Custom-Method Implementation (Core Changes)
 
-Implement a custom payment processor inside `cdk-ehash`:
+**Goal:** Stop depending on mining-share/NUT-XX entirely by using **custom payment method + extras**.
 
-- `get_settings()`:
-  - Return `SettingsResponse { custom: {"ehash": "<json or empty>"}, unit: "EHASH", ... }`.
+**Approach (recommended):**
+1. **Core types**:
+   - Add `MintQuoteCustomRequest` / `MintQuoteCustomResponse` in `cashu` (likely `nut04` or a new NUT-XX-free module).
+   - Include `extra: serde_json::Value` for fields like `header_hash`, `keyset_id`, `amount_issued`, `share_height`, `pool_id`.
+2. **Mint routing**:
+   - Add generic custom-method mint quote/mint endpoints in `cdk-axum`:
+     - `POST /v1/mint/quote/{method}`
+     - `GET /v1/mint/quote/{method}/{id}`
+     - `POST /v1/mint/{method}`
+     - `POST /v1/mint/{method}/batch`
+   - Ensure `PaymentMethod::Custom(method)` is used.
+3. **Mint core**:
+   - Extend `MintQuoteRequest/Response` to include a `Custom` variant.
+   - Add validation helpers for custom requests (e.g., required fields in `extra`).
+4. **Wallet connector**:
+   - Add generic “custom method” HTTP calls in `MintConnector`.
+   - Avoid new dedicated methods per custom type; use a single custom flow.
+5. **Auth routing**:
+   - Extend `RoutePath` or add a pattern-based auth hook so custom endpoints can be protected without adding one enum variant per custom method.
+6. **FFI**:
+   - Add a single custom-mint-quote API surface if needed, using `extra` JSON.
 
-- `create_incoming_payment_request(...)`:
-  - Parse `CustomIncomingPaymentOptions.extra_json` for `header_hash`.
-  - Validate header hash format and not‑all‑zero.
-  - Return `CreateIncomingPaymentResponse` with:
-    - `request_lookup_id = CustomId(header_hash_hex)`
-    - `request = header_hash_hex` (or a short formatted request string)
-    - `expiry = Some(unix_expiry)`
-    - `extra_json = Some({ header_hash, keyset_id?, amount_issued? })`
-
-- `check_incoming_payment_status(payment_identifier)`:
-  - Minimal approach: resolve status from mint quotes using
-    `DynMintDatabase::get_mint_quote_by_request_lookup_id`.
-  - Return “paid” when quote exists for this identifier.
-
-- `wait_payment_event()`:
-  - Can be empty stream or immediate “paid” events if async updates needed.
-
----
-
-## 5) Wire Into Mint Startup (Minimal)
-
-- In `cdk-mintd` (or mint binary), register ehash processor:
-  - `MintBuilder::add_payment_processor(...)` with the ehash `MintPayment`.
-- Ensure `create_mint_router(..., custom_methods)` includes `"ehash"` to enable custom routes.
-- No core API changes required.
+**Why this design:**
+- Enables upstreaming without baking in ehash-specific types.
+- Removes all mining-share/NUT-XX code from your fork once ehash is fully custom.
 
 ---
 
-## 6) Wallet Integration (No Core Changes)
+## 5) Wire Into Mint Startup
 
-Use existing `MintConnector` methods:
+**Phase 1:** Wire the `cdk-ehash` axum router into `cdk-mintd`.
 
+**Phase 2:** Register custom-method processor and ensure `ehash` is included in custom route handling.
+
+---
+
+## 6) Wallet Integration
+
+**Phase 1:** Use explicit ehash endpoints from `cdk-ehash::wallet`.
+
+**Phase 2:** Use a generic custom-method connector:
 - `post_mint_quote(MintQuoteRequest::Custom { method: "ehash", request })`
 - `get_mint_quote_status(PaymentMethod::Custom("ehash"), quote_id)`
 - `post_mint(PaymentMethod::Custom("ehash"), MintRequest { ... })`
 - `post_batch_mint(PaymentMethod::Custom("ehash"), BatchMintRequest { ... })`
 
-`cdk-ehash::wallet` provides typed wrappers around these.
-
 ---
 
-## 7) Remove Mining-Share Code From Fork
+## 7) Remove Mining-Share Code From Fork (Phase 2+)
 
-On the new branch, **do not carry** any of the old mining‑share artifacts into `main`:
-
+On the Phase 2 branch, **do not carry** any of the old mining‑share artifacts into `main`:
 - `cashu` NUT‑XX / mining_share types
 - `PaymentMethod::MiningShare` / `PaymentIdentifier::MiningShareHash`
 - mining_share endpoints in `cdk-axum`
@@ -134,14 +145,21 @@ On the new branch, **do not carry** any of the old mining‑share artifacts into
 - mining_share FFI types / subscription kinds
 - mining_share migrations (keyset_id on mint quotes)
 
-This shrinks the fork diff to just the new crate + wiring.
+This shrinks the fork diff to just the new crate + wiring + generic custom-method support (which can be upstreamed).
 
 ---
 
 ## 8) Reapply onto Latest `main`
 
-- Rebase or reapply only `cdk-ehash` and minimal wiring on top of `origin/main`.
-- Conflicts should be limited to workspace `Cargo.toml` and mintd wiring.
+**Phase 1 instructions:**
+- Commit the Phase 1 changes in this fork.
+- Create a fresh branch off `origin/main`.
+- Cherry-pick the Phase 1 commit(s).
+- Validate full-stack behavior on latest `main`.
+
+**Phase 2 instructions:**
+- Implement custom-method support on a new branch off `origin/main`.
+- Once stable, drop mining-share/NUT-XX usages and remove legacy endpoints.
 
 ---
 
@@ -169,12 +187,22 @@ This shrinks the fork diff to just the new crate + wiring.
 
 ---
 
-## Implementation Checklist (Optional)
+## Implementation Checklist (Phased)
 
+**Phase 1 (now):**
 1. Add `crates/cdk-ehash` to workspace.
 2. Scaffold modules + types.
-3. Implement `EhashPaymentProcessor`.
-4. Wire into mintd + custom methods list.
+3. Implement ehash endpoints (delegating to mining-share logic).
+4. Wire into mintd.
 5. Implement wallet helper API.
 6. Add basic tests.
 7. Rebase onto latest `main`.
+
+**Phase 2 (custom method):**
+1. Add core custom request/response types with `extra` JSON.
+2. Wire custom-method routes in `cdk-axum`.
+3. Extend `MintQuoteRequest/Response` in `cdk`.
+4. Add generic custom-method support in `MintConnector`.
+5. Add auth handling for custom routes.
+6. Update `cdk-ehash` to use custom method (drop mining-share dependency).
+7. Remove NUT-XX/mining-share artifacts from fork.
