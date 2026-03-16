@@ -23,6 +23,7 @@ lnbits = ["dep:cdk-lnbits"]
 fakewallet = ["dep:cdk-fake-wallet"]
 ldk-node = ["dep:cdk-ldk-node"]
 grpc-processor = ["dep:cdk-payment-processor", "cdk-signatory/grpc"]
+ehash = ["dep:cdk-ehash"]
 sqlcipher = ["sqlite", "cdk-sqlite/sqlcipher"]
 # MSRV is not committed to with swagger enabled
 swagger = ["cdk-axum/swagger", "dep:utoipa", "dep:utoipa-swagger-ui"]
@@ -67,6 +68,7 @@ lightning-invoice.workspace = true
 home.workspace = true
 utoipa = { workspace = true, optional = true }
 utoipa-swagger-ui = { version = "9.0.0", features = ["axum"], optional = true }
+cdk-ehash = { workspace = true, optional = true }
 
 [lints]
 workspace = true

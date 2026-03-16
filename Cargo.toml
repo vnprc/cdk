@@ -66,6 +66,7 @@ cdk-signatory = { path = "./crates/cdk-signatory", version = "=0.15.1", default-
 cdk-mintd = { path = "./crates/cdk-mintd", version = "=0.15.1", default-features = false }
 cdk-prometheus = { path = "./crates/cdk-prometheus", version = "=0.15.1", default-features = false }
 cdk-npubcash = { path = "./crates/cdk-npubcash", version = "=0.15.1" }
+cdk-ehash = { path = "./crates/cdk-ehash", version = "=0.15.1" }
 cdk-http-client = { path = "./crates/cdk-http-client", version = "=0.15.1" }
 clap = { version = "4.5.31", features = ["derive"] }
 ciborium = { version = "0.2.2", default-features = false, features = ["std"] }

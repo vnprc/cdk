@@ -22,7 +22,8 @@ use cdk::nuts::nut00::KnownMethod;
     feature = "lnd",
     feature = "ldk-node",
     feature = "fakewallet",
-    feature = "grpc-processor"
+    feature = "grpc-processor",
+    feature = "ehash"
 ))]
 use cdk::nuts::nut17::SupportedMethods;
 use cdk::nuts::nut19::{CachedEndpoint, Method as NUT19Method, Path as NUT19Path};
@@ -364,13 +365,32 @@ async fn configure_mint_builder(
     runtime: Option<std::sync::Arc<tokio::runtime::Runtime>>,
     work_dir: &Path,
     kv_store: Option<Arc<dyn KVStore<Err = cdk::cdk_database::Error> + Send + Sync>>,
+    extra_processors: Vec<(
+        cdk::nuts::CurrencyUnit,
+        Arc<dyn MintPayment<Err = cdk_common::payment::Error> + Send + Sync>,
+    )>,
 ) -> Result<MintBuilder> {
     // Configure basic mint information
     let mint_builder = configure_basic_info(settings, mint_builder);
 
     // Configure lightning backend
-    let mint_builder =
+    let mut mint_builder =
         configure_lightning_backend(settings, mint_builder, runtime, work_dir, kv_store).await?;
+
+    // Register extra payment processors (e.g. ehash)
+    if !extra_processors.is_empty() {
+        let extra_limits = MintMeltLimits {
+            mint_min: settings.ln.min_mint,
+            mint_max: settings.ln.max_mint,
+            melt_min: settings.ln.min_melt,
+            melt_max: settings.ln.max_melt,
+        };
+        for (unit, processor) in extra_processors {
+            mint_builder =
+                configure_backend_for_unit(settings, mint_builder, unit, extra_limits, processor)
+                    .await?;
+        }
+    }
 
     // Extract configured payment methods from mint_builder
     let mint_info = mint_builder.current_mint_info();
@@ -1334,6 +1354,7 @@ pub async fn run_mintd(
         db_password,
         runtime,
         routers,
+        vec![],
     )
     .await;
 
@@ -1358,6 +1379,10 @@ pub async fn run_mintd_with_shutdown(
     db_password: Option<String>,
     runtime: Option<std::sync::Arc<tokio::runtime::Runtime>>,
     routers: Vec<Router>,
+    extra_processors: Vec<(
+        cdk::nuts::CurrencyUnit,
+        Arc<dyn MintPayment<Err = cdk_common::payment::Error> + Send + Sync>,
+    )>,
 ) -> Result<()> {
     let (localstore, keystore, kv) = initial_setup(work_dir, settings, db_password.clone()).await?;
 
@@ -1389,8 +1414,15 @@ pub async fn run_mintd_with_shutdown(
         }
     };
 
-    let mint_builder =
-        configure_mint_builder(settings, maybe_mint_builder, runtime, work_dir, Some(kv)).await?;
+    let mint_builder = configure_mint_builder(
+        settings,
+        maybe_mint_builder,
+        runtime,
+        work_dir,
+        Some(kv),
+        extra_processors,
+    )
+    .await?;
     let (mint_builder, auth_localstore) =
         setup_authentication(settings, work_dir, mint_builder, db_password).await?;
 

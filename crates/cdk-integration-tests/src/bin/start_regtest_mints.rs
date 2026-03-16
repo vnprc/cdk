@@ -114,6 +114,7 @@ async fn start_cln_mint(
             None,
             None,
             vec![],
+            vec![],
         )
         .await
         {
@@ -179,6 +180,7 @@ async fn start_lnd_mint(
             shutdown_future,
             None,
             None,
+            vec![],
             vec![],
         )
         .await
@@ -262,6 +264,7 @@ async fn start_ldk_mint(
             shutdown_future,
             None,
             runtime,
+            vec![],
             vec![],
         )
         .await

@@ -1334,6 +1334,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "cdk-ehash"
+version = "0.15.1"
+dependencies = [
+ "async-trait",
+ "cdk-common",
+ "futures",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "cdk-fake-wallet"
 version = "0.15.1"
 dependencies = [
@@ -1555,6 +1571,7 @@ dependencies = [
  "cdk-axum",
  "cdk-cln",
  "cdk-common",
+ "cdk-ehash",
  "cdk-fake-wallet",
  "cdk-ldk-node",
  "cdk-lnbits",
