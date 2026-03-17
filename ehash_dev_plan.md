@@ -41,7 +41,7 @@ Rationale: `main` already supports custom methods, custom units, and `extra` JSO
 
 ## 3) New Crate: `crates/cdk-ehash`
 
-Create a new workspace crate with a clear module layout:
+**Planned module layout (Phase 1):**
 
 ```
 crates/cdk-ehash/
@@ -54,32 +54,25 @@ crates/cdk-ehash/
     ffi.rs (optional)  // separate FFI surface if needed
 ```
 
-### `types.rs`
-- Define `EhashQuoteRequest`, `EhashQuoteResponse`, `EhashBatchEntry`.
-- Provide conversions to/from:
-  - `cdk::nuts::MintQuoteCustomRequest`
-  - `cdk::nuts::MintQuoteCustomResponse`
-- Handle `extra` JSON packing/unpacking.
+**Actual module layout (Phase 2):**
 
-### `mint.rs`
-- Provide mint‑side helpers that map to the underlying quote logic.
+```
+crates/cdk-ehash/
+  src/
+    lib.rs
+    error.rs           // error types
+    payment.rs         // EhashPaymentProcessor implementing MintPayment
+```
 
-### `wallet.rs`
-- Helpers wrapping mint HTTP:
-  - `create_ehash_quote(...)`
-  - `check_ehash_quote(...)`
-  - `mint_ehash(...)`
-  - `batch_mint_ehash(...)`
-- Add batch validation for matching `keyset_id` in `extra` if required.
+Phase 2 is simpler because custom-method routing, wallet connectors, and axum routes are all handled generically by upstream `cdk-axum` and `cdk`. No ehash-specific axum or wallet modules are needed.
 
-### `axum.rs`
-- Provide ehash endpoints:
-  - `POST /v1/mint/quote/ehash`
-  - `GET /v1/mint/quote/ehash/{id}`
-  - `POST /v1/mint/ehash`
-  - `POST /v1/mint/ehash/batch`
-- **Phase 1:** these endpoints delegate to mining‑share logic to keep core untouched.
-- **Phase 2:** these endpoints use custom-method core handling (no mining‑share).
+### `payment.rs`
+- `EhashPaymentProcessor` implements the `MintPayment` trait.
+- `create_incoming_payment_request` validates `header_hash` (64-char hex) from `extra_json`.
+- Uses `PaymentIdentifier::CustomId(header_hash)` as the payment identifier.
+- `pay_ehash_quote(&self, header_hash, amount)` — Hashpool calls this to trigger payment when a share is validated.
+- `get_settings()` returns `custom: {"ehash": ""}` so upstream routing auto-registers the method.
+- No outgoing payments, no LN-specific imports.
 
 ---
 
@@ -87,27 +80,17 @@ crates/cdk-ehash/
 
 **Goal:** Stop depending on mining-share/NUT-XX entirely by using **custom payment method + extras**.
 
-**Approach (recommended):**
-1. **Core types**:
-   - Add `MintQuoteCustomRequest` / `MintQuoteCustomResponse` in `cashu` (likely `nut04` or a new NUT-XX-free module).
-   - Include `extra: serde_json::Value` for fields like `header_hash`, `keyset_id`, `amount_issued`, `share_height`, `pool_id`.
-2. **Mint routing**:
-   - Add generic custom-method mint quote/mint endpoints in `cdk-axum`:
-     - `POST /v1/mint/quote/{method}`
-     - `GET /v1/mint/quote/{method}/{id}`
-     - `POST /v1/mint/{method}`
-     - `POST /v1/mint/{method}/batch`
-   - Ensure `PaymentMethod::Custom(method)` is used.
-3. **Mint core**:
-   - Extend `MintQuoteRequest/Response` to include a `Custom` variant.
-   - Add validation helpers for custom requests (e.g., required fields in `extra`).
-4. **Wallet connector**:
-   - Add generic “custom method” HTTP calls in `MintConnector`.
-   - Avoid new dedicated methods per custom type; use a single custom flow.
-5. **Auth routing**:
-   - Extend `RoutePath` or add a pattern-based auth hook so custom endpoints can be protected without adding one enum variant per custom method.
-6. **FFI**:
-   - Add a single custom-mint-quote API surface if needed, using `extra` JSON.
+**Approach (all items 1–5 were already present in `main`; 6–7 completed in this branch):**
+1. **Core types** ✅ (in `main`): `MintQuoteCustomRequest` / `MintQuoteCustomResponse` with `extra: serde_json::Value`.
+2. **Mint routing** ✅ (in `main`): Generic custom-method routes in `cdk-axum` (`POST /v1/mint/quote/{method}`, etc.).
+3. **Mint core** ✅ (in `main`): `PaymentMethod::Custom(method)` + `PaymentIdentifier::CustomId(...)`.
+4. **Wallet connector** ✅ (in `main`): Generic custom-method HTTP calls in `MintConnector`.
+5. **Auth routing** ✅ (in `main`): Pattern-based auth for custom endpoints.
+6. **`cdk-ehash` custom method** ✅ (this branch): `EhashPaymentProcessor` uses custom-method flow; no mining-share dependency.
+7. **Remove mining-share artifacts** ✅ (this branch): No NUT-XX/mining-share code anywhere in the fork.
+8. **`extra_json` DB persistence** ✅ (this branch): Migration added to `cdk-sql-common` (sqlite + postgres); all quote queries updated.
+9. **`cdk-mintd` wiring** ✅ (this branch): `run_mintd_with_shutdown` accepts `extra_processors: Vec<(CurrencyUnit, Arc<dyn MintPayment>)>`.
+10. **`mint_with_signing_key`** ✅ (this branch): Wallet crate supports externally-created quotes (needed for Hashpool server-side quote flow).
 
 **Why this design:**
 - Enables upstreaming without baking in ehash-specific types.
@@ -119,7 +102,7 @@ crates/cdk-ehash/
 
 **Phase 1:** Wire the `cdk-ehash` axum router into `cdk-mintd`.
 
-**Phase 2:** Register custom-method processor and ensure `ehash` is included in custom route handling.
+**Phase 2 (complete):** `run_mintd_with_shutdown` accepts `extra_processors: Vec<(CurrencyUnit, Arc<dyn MintPayment>)>`. Hashpool creates `Arc<EhashPaymentProcessor>`, passes it as `extra_processors`, and retains the Arc to call `pay_ehash_quote()` when shares are validated. Custom routes are auto-generated by `cdk-axum`.
 
 ---
 
@@ -127,11 +110,13 @@ crates/cdk-ehash/
 
 **Phase 1:** Use explicit ehash endpoints from `cdk-ehash::wallet`.
 
-**Phase 2:** Use a generic custom-method connector:
+**Phase 2 (complete):** Uses the generic custom-method connector already in `main`:
 - `post_mint_quote(MintQuoteRequest::Custom { method: "ehash", request })`
 - `get_mint_quote_status(PaymentMethod::Custom("ehash"), quote_id)`
 - `post_mint(PaymentMethod::Custom("ehash"), MintRequest { ... })`
 - `post_batch_mint(PaymentMethod::Custom("ehash"), BatchMintRequest { ... })`
+
+`mint_with_signing_key` added to the wallet crate (commit `9a634ec0`) to support externally-created quotes — required for the Hashpool flow where the server creates quotes on behalf of miners.
 
 ---
 
@@ -147,30 +132,26 @@ On the Phase 2 branch, **do not carry** any of the old mining‑share artifacts 
 
 This shrinks the fork diff to just the new crate + wiring + generic custom-method support (which can be upstreamed).
 
+**Complete on `ehash-phase2`:** None of these artifacts exist in the branch.
+
 ---
 
 ## 8) Reapply onto Latest `main`
 
-**Phase 1 instructions:**
-- Commit the Phase 1 changes in this fork.
-- Create a fresh branch off `origin/main`.
-- Cherry-pick the Phase 1 commit(s).
-- Validate full-stack behavior on latest `main`.
+**Phase 1 (complete):** Committed, rebased onto `origin/main`, validated.
 
-**Phase 2 instructions:**
-- Implement custom-method support on a new branch off `origin/main`.
-- Once stable, drop mining-share/NUT-XX usages and remove legacy endpoints.
+**Phase 2 (complete):** Implemented on fresh branch `ehash-phase2` off `origin/main`. Hashpool successfully updated to use this branch and smoke tested end-to-end.
 
 ---
 
 ## 9) Tests
 
-**Unit tests** in `cdk-ehash`:
-- JSON packing/unpacking for `extra`.
+**Unit tests** in `cdk-ehash` (pending — Phase 3):
+- JSON packing/unpacking for `extra_json`.
 - Validation of `header_hash`.
 - Custom unit normalization (`EHASH`).
 
-**Integration tests** (required):
+**Integration tests** (pending — Phase 3):
 - Create quote → check status → mint.
 - Batch mint with multiple quotes.
 - Ensure custom routes respond for `ehash`.
@@ -189,31 +170,46 @@ This shrinks the fork diff to just the new crate + wiring + generic custom-metho
 
 ## Implementation Checklist (Phased)
 
-**Phase 1 (now):**
-1. Add `crates/cdk-ehash` to workspace.
-2. Scaffold modules + types.
-3. Implement ehash endpoints (delegating to mining-share logic).
-4. Wire into mintd.
-5. Implement wallet helper API.
-6. Add basic tests.
-7. Rebase onto latest `main`.
+**Phase 1 (complete):**
+- [x] Add `crates/cdk-ehash` to workspace.
+- [x] Scaffold modules + types.
+- [x] Implement ehash endpoints (delegating to mining-share logic).
+- [x] Wire into mintd.
+- [x] Implement wallet helper API.
+- [x] Add basic tests.
+- [x] Rebase onto latest `main`.
 
-**Phase 2 (custom method):**
-1. Add core custom request/response types with `extra` JSON.
-2. Wire custom-method routes in `cdk-axum`.
-3. Extend `MintQuoteRequest/Response` in `cdk`.
-4. Add generic custom-method support in `MintConnector`.
-5. Add auth handling for custom routes.
-6. Update `cdk-ehash` to use custom method (drop mining-share dependency).
-7. Remove NUT-XX/mining-share artifacts from fork.
+**Phase 2 (complete):**
+- [x] Core custom request/response types with `extra` JSON (already in `main`).
+- [x] Custom-method routes in `cdk-axum` (already in `main`).
+- [x] `MintQuoteRequest/Response` custom variants in `cdk` (already in `main`).
+- [x] Generic custom-method support in `MintConnector` (already in `main`).
+- [x] Auth handling for custom routes (already in `main`).
+- [x] Update `cdk-ehash` to use custom method (drop mining-share dependency).
+- [x] Remove NUT-XX/mining-share artifacts from fork.
+- [x] Add `extra_json` DB persistence (migrations + queries in `cdk-sql-common`).
+- [x] Wire `extra_processors` into `cdk-mintd`.
+- [x] Add `mint_with_signing_key` to wallet crate.
+- [x] Hashpool integration: smoke tested with `ehash-phase2` branch.
+
+**Phase 3 (pending):**
+- [ ] Upstream `mint_with_signing_key` to CDK main (prerequisite for fully dropping the fork on the wallet side).
+- [ ] Write unit tests in `cdk-ehash` (extra_json round-trip, header_hash validation, unit normalization).
+- [ ] Write integration tests (create → check → mint → batch flow).
+- [ ] Extract to standalone git repo.
+- [ ] Publish to crates.io.
 
 ---
 
-## Status (2026-03-13)
+## Status (2026-03-16)
 
-Phase 1:
-- Completed: 1–7. `cdk-ehash` crate is in workspace, endpoints and wallet helpers exist, tests added, and the work is rebased onto `origin/main`.
+**Phase 1:** Complete.
 
-Phase 2:
-- Already present in `main`: 1–5 (custom mint request/response with `extra`, custom-method routing, `MintQuoteRequest/Response` variants, generic mint connector, auth handling).
-- Completed in this branch: 6–7 (ehash now uses custom-method flow; mining-share/NUT-XX references removed from ehash).
+**Phase 2:** Complete. The `ehash-phase2` branch contains:
+- `cdk-ehash` crate with `EhashPaymentProcessor` implementing `MintPayment` (`lib.rs`, `error.rs`, `payment.rs`).
+- Thin patch: `extra_json` column added to `mint_quotes` DB table (sqlite + postgres migrations in `cdk-sql-common`).
+- `cdk-mintd` extended with `extra_processors` hook point.
+- `mint_with_signing_key` added to the wallet crate.
+- Hashpool successfully modified to use this branch and smoke tested end-to-end.
+
+**Phase 3:** Next — upstream `mint_with_signing_key` to CDK main, unit tests, integration tests, standalone repo extraction, crates.io publish.
