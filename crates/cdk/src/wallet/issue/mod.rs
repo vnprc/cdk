@@ -367,6 +367,31 @@ impl Wallet {
         Ok(saga.into_proofs())
     }
 
+    /// Mint tokens for an externally-created quote, signing the request with the provided key.
+    ///
+    /// This is identical to [`mint`] but first stores `signing_key` on the locally-cached
+    /// quote so that the NUT-20 witness is included in the [`MintRequest`].  Use this when
+    /// the quote was created by a third party (e.g. a mining pool) with a known public key
+    /// and you hold the corresponding secret key.
+    pub async fn mint_with_signing_key(
+        &self,
+        quote_id: &str,
+        amount_split_target: SplitTarget,
+        spending_conditions: Option<SpendingConditions>,
+        signing_key: SecretKey,
+    ) -> Result<Proofs, Error> {
+        let mut quote = self
+            .localstore
+            .get_mint_quote(quote_id)
+            .await?
+            .ok_or(Error::UnknownQuote)?;
+        quote.secret_key = Some(signing_key);
+        self.localstore.add_mint_quote(quote).await?;
+
+        self.mint(quote_id, amount_split_target, spending_conditions)
+            .await
+    }
+
     /// Fetch a mint quote from the mint and store it locally
     ///
     /// This method contacts the mint to get the current state of a quote,
