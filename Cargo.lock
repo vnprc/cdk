@@ -1436,6 +1436,7 @@ dependencies = [
  "cdk-axum",
  "cdk-cln",
  "cdk-common",
+ "cdk-ehash",
  "cdk-fake-wallet",
  "cdk-ffi",
  "cdk-http-client",

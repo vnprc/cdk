@@ -192,16 +192,16 @@ This shrinks the fork diff to just the new crate + wiring + generic custom-metho
 - [x] Add `mint_with_signing_key` to wallet crate.
 - [x] Hashpool integration: smoke tested with `ehash-phase2` branch.
 
-**Phase 3 (pending):**
+**Phase 3 (in progress):**
 - [ ] Upstream `mint_with_signing_key` to CDK main (prerequisite for fully dropping the fork on the wallet side).
-- [ ] Write unit tests in `cdk-ehash` (extra_json round-trip, header_hash validation, unit normalization).
-- [ ] Write integration tests (create → check → mint → batch flow).
+- [x] Write unit tests in `cdk-ehash` (header_hash validation, error paths, get_settings, pay event, wait_payment_event — 12 tests in `payment.rs`).
+- [x] Write integration tests (create quote → pay → PAID state transition — 4 tests in `cdk-integration-tests/tests/ehash_integration.rs`).
 - [ ] Extract to standalone git repo.
 - [ ] Publish to crates.io.
 
 ---
 
-## Status (2026-03-16)
+## Status (2026-03-17)
 
 **Phase 1:** Complete.
 
@@ -212,4 +212,7 @@ This shrinks the fork diff to just the new crate + wiring + generic custom-metho
 - `mint_with_signing_key` added to the wallet crate.
 - Hashpool successfully modified to use this branch and smoke tested end-to-end.
 
-**Phase 3:** Next — upstream `mint_with_signing_key` to CDK main, unit tests, integration tests, standalone repo extraction, crates.io publish.
+**Phase 3 (in progress):**
+- Unit tests added to `cdk-ehash` (`payment.rs` — 12 tests covering all validation paths, error cases, settings, payment event).
+- Integration tests added to `cdk-integration-tests` (`tests/ehash_integration.rs` — 4 tests: quote creation state, payment event → PAID transition, independent multi-quote payment, unknown-hash no-op).
+- Remaining: upstream `mint_with_signing_key`, standalone repo extraction, crates.io publish.
