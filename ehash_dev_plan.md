@@ -116,7 +116,7 @@ Phase 2 is simpler because custom-method routing, wallet connectors, and axum ro
 - `post_mint(PaymentMethod::Custom("ehash"), MintRequest { ... })`
 - `post_batch_mint(PaymentMethod::Custom("ehash"), BatchMintRequest { ... })`
 
-`mint_with_signing_key` added to the wallet crate (commit `9a634ec0`) to support externally-created quotes — required for the Hashpool flow where the server creates quotes on behalf of miners.
+Hashpool uses `batch_mint` with `external_keys` to redeem quotes — no wallet-crate fork patch needed.
 
 ---
 
@@ -151,7 +151,7 @@ This shrinks the fork diff to just the new crate + wiring + generic custom-metho
 - Validation of `header_hash`.
 - Custom unit normalization (`EHASH`).
 
-**Integration tests** (pending — Phase 3):
+**Integration tests** (complete — moved to standalone `cdk-ehash` repo in Phase 3):
 - Create quote → check status → mint.
 - Batch mint with multiple quotes.
 - Ensure custom routes respond for `ehash`.
@@ -165,6 +165,205 @@ This shrinks the fork diff to just the new crate + wiring + generic custom-metho
   - `/v1/mint/ehash`
 - Do **not** support legacy paths; update mining side to use the new custom URLs.
 - Existing mining‑share quotes in old DB won’t be recognized unless explicitly migrated; plan for clean cutover or a one‑time migration tool.
+
+---
+
+## 11) Phase 3: Standalone Repo + crates.io
+
+### Goal
+Extract `cdk-ehash` from the CDK fork into its own repo at `github.com/vnprc/cdk-ehash`
+and publish to crates.io so Hashpool can depend on it without pinning the entire CDK fork.
+
+### What stays in the CDK fork (not in the standalone crate)
+
+- `extra_json` DB migrations in `cdk-sql-common` — to be upstreamed as a standalone CDK PR;
+  see section 12.
+- `extra_processors` hook in `cdk-mintd` — to be eliminated; see section 12.
+- `cdk-integration-tests/tests/ehash_integration.rs` — move to standalone repo as
+  `tests/integration.rs` with `[dev-dependencies]` on published `cdk` + `cdk-sqlite`.
+
+### Step 1: Create the repo
+
+Create a new git repo with this layout:
+
+```
+cdk-ehash/
+  Cargo.toml          # [package] + [dependencies] with explicit versions
+  src/
+    lib.rs
+    error.rs
+    payment.rs
+  README.md
+  LICENSE             # MIT, matching upstream CDK
+```
+
+No workspace needed — single crate.
+
+### Step 2: Pin cdk-common version
+
+`cdk-ehash` only imports from `cdk-common` (not `cdk`, `cdk-axum`, etc.):
+
+```rust
+use cdk_common::payment::{
+    CreateIncomingPaymentResponse, Error as PaymentError, Event,
+    IncomingPaymentOptions, MakePaymentResponse, MintPayment,
+    OutgoingPaymentOptions, PaymentIdentifier, PaymentQuoteResponse,
+    SettingsResponse, WaitPaymentResponse,
+};
+use cdk_common::{Amount, CurrencyUnit};
+```
+
+The `ehash-phase2` branch is built against `cdk-common = 0.15.1`. The latest crates.io
+release is `0.15.2-rc.0`. Before publishing, verify the `MintPayment` trait and
+`payment::*` types are API-compatible across that range. Target `cdk-common = "0.15"` with
+a `^0.15.1` lower bound (or pin to `0.15.1` if rc.0 introduces breaking changes).
+
+### Step 3: Standalone Cargo.toml
+
+Replace all `*.workspace = true` with explicit values:
+
+```toml
+[package]
+name = "cdk-ehash"
+version = "0.1.0"
+edition = "2021"
+authors = ["vnprc <9425366+vnprc@users.noreply.github.com>"]
+license = "MIT"
+description = "CDK MintPayment processor for Hashpool mining-share rewards"
+homepage = "https://github.com/vnprc/cdk-ehash"
+repository = "https://github.com/vnprc/cdk-ehash"
+readme = "README.md"
+keywords = ["cashu", "bitcoin", "mining", "hashpool", "ecash"]
+categories = ["cryptography::cryptocurrencies"]
+
+[dependencies]
+async-trait = "0.1"
+cdk-common = { version = "0.15.1", features = ["mint"] }
+futures = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["sync"] }
+tokio-stream = "0.1"
+tokio-util = "0.7"
+tracing = "0.1"
+```
+
+Verify exact dependency versions by checking `Cargo.lock` on `ehash-phase2`.
+
+### Step 4: Unit tests
+
+The 12 unit tests already in `payment.rs` travel with the source and work immediately.
+Run `cargo test` to confirm.
+
+### Step 5: Integration tests
+
+Move `cdk-integration-tests/tests/ehash_integration.rs` to `tests/integration.rs` in the
+standalone repo. Add dev-dependencies:
+
+```toml
+[dev-dependencies]
+bip39 = "2"
+cdk = "0.15"
+cdk-sqlite = { version = "0.15", features = ["memory"] }
+tokio = { version = "1", features = ["full"] }
+```
+
+These tests use only published crates — no CDK fork required.
+
+### Step 6: README
+
+Write a README covering:
+- What it does (mining-share quotes via CDK custom payment method)
+- The four-step mint flow (quote → validate → pay_ehash_quote → mint)
+- How to wire into a Hashpool mint binary using `MintBuilder` directly (no `cdk-mintd` dep)
+
+### Step 6: Publish
+
+```bash
+cargo package --list           # verify included files
+cargo publish --dry-run        # catch any manifest issues
+cargo publish
+```
+
+### Unresolved questions before publishing
+
+- **Repo location:** `vnprc/cdk-ehash`.
+- **Versioning:** start at `0.1.0`; track `cdk-common` major bumps manually.
+
+---
+
+## 12) Eliminating the CDK Fork Patches
+
+The two remaining fork patches are `extra_processors` in `cdk-mintd` and `extra_json` in
+`cdk-sql-common`. The goal is to reach zero fork diff so Hashpool pins upstream CDK directly.
+
+### `extra_processors` — eliminate by bypassing `cdk-mintd`
+
+`extra_processors` only exists because `cdk-mintd` (the binary) has no hook for injecting
+custom payment processors at startup. But `MintBuilder::add_payment_processor` is already
+a public API in the `cdk` library crate. `cdk-mintd` is just a thin binary over it.
+
+**Solution: Hashpool builds its own mint daemon instead of using `cdk-mintd`.**
+
+Hashpool's mint binary:
+1. Creates `MintBuilder` (from `cdk`) and calls `add_payment_processor(ehash_unit, method, limits, Arc::new(EhashPaymentProcessor::new(...)))`
+2. Calls `MintBuilder::build_with_seed(...)` to get a `Mint`
+3. Creates an axum router via `cdk_axum::create_mint_router(Arc::new(mint), vec!["ehash".to_string()])`
+4. Runs the axum server
+
+No LN node needed. No `cdk-mintd` dependency. No fork patch.
+
+The integration tests already demonstrate this exact pattern — they build a fully functional
+ehash mint with just `cdk` + `cdk-sqlite` + `cdk-ehash`, no LN, no `cdk-mintd`.
+
+Dependencies for Hashpool's mint binary:
+```toml
+cdk = "0.15"
+cdk-axum = "0.15"
+cdk-sqlite = "0.15"
+cdk-ehash = "0.1"           # from crates.io once published
+tokio = { version = "1", features = ["full"] }
+```
+
+### `extra_json` — NOT droppable; upstream it as a CDK bug fix
+
+After deep inspection, the situation is more subtle than "just metadata":
+
+**Upstream CDK has `extra_json` fully wired in the application layer:**
+- `CreateIncomingPaymentResponse.extra_json` — `cdk-common/src/payment.rs` ✅ upstream
+- `MintQuote.extra_json` — `cdk-common/src/mint.rs` ✅ upstream
+- `cdk/src/mint/issue/mod.rs` stores it from the processor response ✅ upstream
+- `MintQuoteCustomResponse.extra` is populated from `mint_quote.extra_json` ✅ upstream
+
+**But upstream CDK does NOT persist `extra_json` to the database:**
+- No `extra_json` column in `mint_quote` table ❌
+- INSERT omits it ❌
+- SELECT doesn't read it back ❌
+- No migration ❌
+
+This is a gap between the designed API and the persistence layer. Upstream CDK explicitly
+designed `extra_json` into the custom payment method contract (`CreateIncomingPaymentResponse`)
+but never wired it through the DB. After any mint restart, all `MintQuote.extra_json`
+values silently become `None`.
+
+**Payment correctness is unaffected** — UNPAID → PAID uses `request_lookup_id` which IS
+persisted. But `GET /v1/mint/quote/ehash/{id}` returns `"extra": null` after restart,
+breaking any wallet or tooling that reads `header_hash` from the quote response.
+
+**Recommendation:** upstream the patch as a standalone CDK PR. It has zero ehash-specific
+logic — it simply persists a field that upstream CDK already defines and populates in
+memory but forgets to write to disk. The fork patch is already correct and production-ready.
+Keep the fork carrying it until the upstream PR merges.
+
+### End state
+
+With both patches resolved:
+- `extra_processors` eliminated — Hashpool builds its own mint binary on `MintBuilder` directly
+- `extra_json` upstreamed — CDK carries it, fork patch retired after merge
+- Hashpool depends on published `cdk`, `cdk-axum`, `cdk-sqlite`, `cdk-ehash` — no fork
+- CDK fork branch (`ehash-phase2`) can be retired
+- `cdk-ehash` standalone repo is the only Hashpool-specific artifact
 
 ---
 
@@ -193,11 +392,21 @@ This shrinks the fork diff to just the new crate + wiring + generic custom-metho
 - [x] Hashpool integration: smoke tested with `ehash-phase2` branch.
 
 **Phase 3 (in progress):**
-- [ ] Upstream `mint_with_signing_key` to CDK main (prerequisite for fully dropping the fork on the wallet side).
-- [x] Write unit tests in `cdk-ehash` (header_hash validation, error paths, get_settings, pay event, wait_payment_event — 12 tests in `payment.rs`).
-- [x] Write integration tests (create quote → pay → PAID state transition — 4 tests in `cdk-integration-tests/tests/ehash_integration.rs`).
-- [ ] Extract to standalone git repo.
-- [ ] Publish to crates.io.
+- [x] Write unit tests in `cdk-ehash` (12 tests in `payment.rs`).
+- [x] Write integration tests (4 tests in `cdk-integration-tests/tests/ehash_integration.rs`).
+- [ ] Open upstream CDK PR: persist `extra_json` in `cdk-sql-common` (no ehash-specific logic; completes an intentionally-designed but unfinished feature).
+- [ ] Verify `cdk-common` API compatibility between fork version and latest crates.io release.
+- [ ] Create standalone git repo with explicit `Cargo.toml` (no workspace inheritance).
+- [ ] Move integration tests to standalone repo as `tests/integration.rs`.
+- [ ] Write README.
+- [ ] `cargo publish`.
+- [ ] Update Hashpool to depend on published `cdk-ehash` instead of CDK fork path dep.
+- [ ] Replace `cdk-mintd` usage in Hashpool with direct `MintBuilder` + `cdk-axum` wiring (eliminates `extra_processors` fork patch).
+- [ ] Retire `ehash-phase2` branch once upstream `extra_json` PR merges and Hashpool pins upstream CDK.
+
+**Notes:**
+- `mint_with_signing_key` removed from scope — Hashpool uses `batch_mint` with `external_keys`.
+- No LN node required for Hashpool's mint — `EhashPaymentProcessor` is the only backend.
 
 ---
 
@@ -213,6 +422,6 @@ This shrinks the fork diff to just the new crate + wiring + generic custom-metho
 - Hashpool successfully modified to use this branch and smoke tested end-to-end.
 
 **Phase 3 (in progress):**
-- Unit tests added to `cdk-ehash` (`payment.rs` — 12 tests covering all validation paths, error cases, settings, payment event).
-- Integration tests added to `cdk-integration-tests` (`tests/ehash_integration.rs` — 4 tests: quote creation state, payment event → PAID transition, independent multi-quote payment, unknown-hash no-op).
-- Remaining: upstream `mint_with_signing_key`, standalone repo extraction, crates.io publish.
+- Unit tests in `cdk-ehash/src/payment.rs` (12 tests).
+- Integration tests in `cdk-integration-tests/tests/ehash_integration.rs` (4 tests) — to be moved to standalone repo.
+- Remaining: standalone repo, publish, Hashpool migration off CDK fork.
