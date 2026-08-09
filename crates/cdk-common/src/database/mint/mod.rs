@@ -361,9 +361,14 @@ pub trait QuotesDatabase {
     /// Get Mint Quotes
     async fn get_mint_quotes(&self) -> Result<Vec<MintMintQuote>, Self::Err>;
     /// Get Mint Quotes By Pubkey
+    ///
+    /// When `only_mintable` is `true`, the result is bounded to quotes that are still mintable
+    /// (`amount_paid > amount_issued`); when `false`, every quote for `pubkeys` is returned
+    /// regardless of accounting state.
     async fn get_mint_quotes_by_pubkey(
         &self,
         pubkeys: &[PublicKey],
+        only_mintable: bool,
     ) -> Result<Vec<MintMintQuote>, Self::Err>;
     /// Get [`mint::MeltQuote`]
     async fn get_melt_quote(

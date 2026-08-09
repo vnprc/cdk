@@ -422,6 +422,11 @@ impl Mint {
     /// Every pubkey must be accompanied by a signature proving control of the corresponding
     /// private key; the request is rejected outright unless all of them verify.
     ///
+    /// `only_mintable` bounds the response to quotes that are still mintable
+    /// (`amount_issued < amount_paid`) when `true`. It is a response-side convenience only: it
+    /// is not part of the signed message, carries no security weight, and does not affect which
+    /// signatures are required or how they're checked.
+    ///
     /// # Returns
     /// * `Vec<MintQuoteResponse<QuoteId>>` - quotes locked to the requested pubkeys
     /// * `Error` if any signature is missing or invalid, or database access fails
@@ -430,6 +435,7 @@ impl Mint {
         &self,
         pubkeys: Vec<PublicKey>,
         signatures: Vec<Signature>,
+        only_mintable: bool,
     ) -> Result<Vec<MintQuoteResponse<QuoteId>>, Error> {
         #[cfg(feature = "prometheus")]
         let metrics = super::MintMetricGuard::new("mint_quotes_by_pubkeys");
@@ -464,7 +470,10 @@ impl Mint {
         }
 
         let result: Result<Vec<MintQuoteResponse<QuoteId>>, Error> = async {
-            let quotes = self.localstore.get_mint_quotes_by_pubkey(&pubkeys).await?;
+            let quotes = self
+                .localstore
+                .get_mint_quotes_by_pubkey(&pubkeys, only_mintable)
+                .await?;
 
             // `TryFrom` is the shared conversion every other quote path uses; hand-rolling it
             // here would drift the moment a response field is added.

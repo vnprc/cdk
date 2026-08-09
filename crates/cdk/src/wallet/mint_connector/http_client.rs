@@ -1638,6 +1638,7 @@ mod tests {
         let request = MintQuoteByPubkeyRequest {
             pubkeys: vec![secret_key.public_key()],
             pubkey_signatures: vec![secret_key.sign(b"test-message").expect("sign")],
+            only_mintable: false,
         };
 
         let responses = client
@@ -1748,6 +1749,7 @@ mod tests {
         let request = MintQuoteByPubkeyRequest {
             pubkeys: vec![secret_key.public_key()],
             pubkey_signatures: vec![secret_key.sign(b"test-message").expect("sign")],
+            only_mintable: false,
         };
 
         let responses = client
@@ -1796,6 +1798,7 @@ mod tests {
         let request = MintQuoteByPubkeyRequest {
             pubkeys: vec![secret_key.public_key()],
             pubkey_signatures: vec![secret_key.sign(b"test-message").expect("sign")],
+            only_mintable: false,
         };
 
         let responses = client
@@ -1845,6 +1848,7 @@ mod tests {
         let request = MintQuoteByPubkeyRequest {
             pubkeys: vec![secret_key.public_key()],
             pubkey_signatures: vec![secret_key.sign(b"test-message").expect("sign")],
+            only_mintable: false,
         };
 
         let responses = client

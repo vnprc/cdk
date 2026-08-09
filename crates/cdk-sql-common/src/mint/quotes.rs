@@ -1299,17 +1299,26 @@ where
     async fn get_mint_quotes_by_pubkey(
         &self,
         pubkeys: &[PublicKey],
+        only_mintable: bool,
     ) -> Result<Vec<MintQuote>, Self::Err> {
         if pubkeys.is_empty() {
             return Ok(vec![]);
         }
+
+        // Filtering here, rather than after loading, also skips the per-quote payments/issuance
+        // follow-up queries below for every excluded row.
+        let mintable_clause = if only_mintable {
+            "AND amount_paid > amount_issued"
+        } else {
+            ""
+        };
 
         let conn = self
             .pool
             .get()
             .await
             .map_err(|e| Error::Database(Box::new(e)))?;
-        let mut mint_quotes = query(
+        let mut mint_quotes = query(&format!(
             r#"
             SELECT
                 id,
@@ -1328,9 +1337,9 @@ where
                 extra_json
             FROM
                 mint_quote
-            WHERE pubkey IN (:pubkeys)
+            WHERE pubkey IN (:pubkeys) {mintable_clause}
             "#,
-        )?
+        ))?
         .bind_vec("pubkeys", pubkeys.iter().map(|pk| pk.to_hex()).collect())?
         .fetch_all(&*conn)
         .await?

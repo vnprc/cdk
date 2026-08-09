@@ -168,9 +168,12 @@ fn mint_quote_response_pubkey(response: &MintQuoteResponse<String>) -> Option<Pu
 /// Build the signed [NUT-XX] request that proves control of `secret_keys` to `mint_pubkey`.
 ///
 /// One signature is produced per key, over `mint_quote_lookup_msg_to_sign(mint_pubkey, pubkey)`.
+/// `only_mintable` rides along unsigned - it bounds the response, not the proof of ownership -
+/// and is set verbatim on the returned request.
 fn build_mint_quote_by_pubkey_request(
     mint_pubkey: &PublicKey,
     secret_keys: &[SecretKey],
+    only_mintable: bool,
 ) -> Result<MintQuoteByPubkeyRequest, Error> {
     ensure_cdk!(
         secret_keys.len() <= MAX_LOOKUP_PUBKEYS,
@@ -195,6 +198,7 @@ fn build_mint_quote_by_pubkey_request(
     Ok(MintQuoteByPubkeyRequest {
         pubkeys,
         pubkey_signatures,
+        only_mintable,
     })
 }
 
@@ -725,6 +729,13 @@ impl Wallet {
     /// send such a quote, but this method now writes mint responses to disk, so it cannot take
     /// the mint's word for which pubkeys they belong to.
     ///
+    /// `only_mintable` is an opt-in, response-bounding filter: when `true`, the mint is asked to
+    /// return only quotes that are still mintable (`amount_issued < amount_paid`), which keeps
+    /// the response small for a caller - e.g. a reconciliation sweep - that only cares about
+    /// quotes it could actually act on right now. It plays no part in proving ownership of
+    /// `secret_keys`; a mint that predates the filter simply ignores it and returns everything,
+    /// same as passing `false`.
+    ///
     /// # Errors
     /// Returns `Ok(vec![])` without contacting the mint if `secret_keys` is empty. Returns
     /// `Error::BatchSizeExceeded` if the deduplicated `secret_keys` is longer than
@@ -735,6 +746,7 @@ impl Wallet {
     pub async fn fetch_mint_quotes_by_pubkey(
         &self,
         secret_keys: &[SecretKey],
+        only_mintable: bool,
     ) -> Result<Vec<MintQuote>, Error> {
         if secret_keys.is_empty() {
             return Ok(Vec::new());
@@ -757,7 +769,8 @@ impl Wallet {
             .pubkey
             .ok_or(Error::MissingPubkey)?;
 
-        let request = build_mint_quote_by_pubkey_request(&mint_pubkey, &deduped_keys)?;
+        let request =
+            build_mint_quote_by_pubkey_request(&mint_pubkey, &deduped_keys, only_mintable)?;
         let responses = self.client.post_mint_quote_by_pubkey(request).await?;
 
         let mut quotes = Vec::with_capacity(responses.len());
@@ -897,11 +910,16 @@ mod tests {
         let mint_pubkey = SecretKey::generate().public_key();
         let secret_keys = vec![SecretKey::generate(), SecretKey::generate()];
 
-        let request = build_mint_quote_by_pubkey_request(&mint_pubkey, &secret_keys)
+        let request = build_mint_quote_by_pubkey_request(&mint_pubkey, &secret_keys, false)
             .expect("request should build for a small key set");
 
         assert_eq!(request.pubkeys.len(), secret_keys.len());
         assert_eq!(request.pubkey_signatures.len(), secret_keys.len());
+        assert!(!request.only_mintable);
+
+        let filtered_request = build_mint_quote_by_pubkey_request(&mint_pubkey, &secret_keys, true)
+            .expect("request should build with the filter set too");
+        assert!(filtered_request.only_mintable);
 
         for ((secret_key, pubkey), signature) in secret_keys
             .iter()
@@ -928,7 +946,7 @@ mod tests {
             .map(|_| SecretKey::generate())
             .collect();
 
-        let result = build_mint_quote_by_pubkey_request(&mint_pubkey, &secret_keys);
+        let result = build_mint_quote_by_pubkey_request(&mint_pubkey, &secret_keys, false);
         assert!(matches!(
             result,
             Err(Error::BatchSizeExceeded { actual, max })
@@ -972,7 +990,7 @@ mod tests {
         mock.set_mint_quote_by_pubkey_response(Ok(canned_response));
 
         let quotes = wallet
-            .fetch_mint_quotes_by_pubkey(std::slice::from_ref(&secret_key))
+            .fetch_mint_quotes_by_pubkey(std::slice::from_ref(&secret_key), false)
             .await
             .expect("lookup should succeed");
 
@@ -999,6 +1017,41 @@ mod tests {
             .public_key()
             .verify(&msg, &sent.pubkey_signatures[0])
             .is_ok());
+    }
+
+    /// The `only_mintable` argument must land on the wire request unchanged - this is the
+    /// wallet-side half of the filter; `crates/cdk/tests/nutxx_mint_quote_lookup.rs` covers the
+    /// mint actually honoring it end to end.
+    #[tokio::test]
+    async fn fetch_mint_quotes_by_pubkey_sets_only_mintable_flag_on_request() {
+        let db = create_test_db().await;
+        let mock = Arc::new(MockMintConnector::new());
+        let wallet = create_test_wallet_with_mock(db, mock.clone()).await;
+
+        let secret_key = SecretKey::generate();
+
+        mock.set_mint_quote_by_pubkey_response(Ok(Vec::new()));
+        wallet
+            .fetch_mint_quotes_by_pubkey(std::slice::from_ref(&secret_key), false)
+            .await
+            .expect("lookup should succeed");
+
+        mock.set_mint_quote_by_pubkey_response(Ok(Vec::new()));
+        wallet
+            .fetch_mint_quotes_by_pubkey(std::slice::from_ref(&secret_key), true)
+            .await
+            .expect("lookup should succeed");
+
+        let captured = mock.captured_mint_quote_by_pubkey_requests.lock().unwrap();
+        assert_eq!(captured.len(), 2);
+        assert!(
+            !captured[0].only_mintable,
+            "only_mintable: false must be sent as false"
+        );
+        assert!(
+            captured[1].only_mintable,
+            "only_mintable: true must reach the request"
+        );
     }
 
     /// A quote for a pubkey the wallet did not request must be dropped, not stored - this
@@ -1031,7 +1084,7 @@ mod tests {
         mock.set_mint_quote_by_pubkey_response(Ok(canned_response));
 
         let quotes = wallet
-            .fetch_mint_quotes_by_pubkey(std::slice::from_ref(&requested_key))
+            .fetch_mint_quotes_by_pubkey(std::slice::from_ref(&requested_key), false)
             .await
             .expect("lookup should succeed even though the returned quote is dropped");
 
@@ -1061,7 +1114,7 @@ mod tests {
 
         let secret_key = SecretKey::generate();
         let result = wallet
-            .fetch_mint_quotes_by_pubkey(std::slice::from_ref(&secret_key))
+            .fetch_mint_quotes_by_pubkey(std::slice::from_ref(&secret_key), false)
             .await;
 
         assert!(matches!(result, Err(Error::MissingPubkey)));
@@ -1085,7 +1138,7 @@ mod tests {
         let wallet = create_test_wallet_with_mock(db, mock.clone()).await;
 
         let quotes = wallet
-            .fetch_mint_quotes_by_pubkey(&[])
+            .fetch_mint_quotes_by_pubkey(&[], false)
             .await
             .expect("an empty lookup should succeed without contacting the mint");
 
@@ -1148,7 +1201,7 @@ mod tests {
 
         mock.set_mint_quote_by_pubkey_response(Ok(canned_response(100, 10)));
         let first = wallet
-            .fetch_mint_quotes_by_pubkey(std::slice::from_ref(&secret_key))
+            .fetch_mint_quotes_by_pubkey(std::slice::from_ref(&secret_key), false)
             .await
             .expect("first lookup should succeed");
         assert_eq!(
@@ -1159,7 +1212,7 @@ mod tests {
 
         mock.set_mint_quote_by_pubkey_response(Ok(canned_response(100, 10)));
         let second = wallet
-            .fetch_mint_quotes_by_pubkey(std::slice::from_ref(&secret_key))
+            .fetch_mint_quotes_by_pubkey(std::slice::from_ref(&secret_key), false)
             .await
             .expect("second lookup should succeed");
 
@@ -1186,7 +1239,7 @@ mod tests {
         // is provably conditional rather than a latch that skips every write after the first.
         mock.set_mint_quote_by_pubkey_response(Ok(canned_response(150, 11)));
         let third = wallet
-            .fetch_mint_quotes_by_pubkey(std::slice::from_ref(&secret_key))
+            .fetch_mint_quotes_by_pubkey(std::slice::from_ref(&secret_key), false)
             .await
             .expect("third lookup should succeed");
         assert_eq!(third[0].amount_paid, Amount::from(150));

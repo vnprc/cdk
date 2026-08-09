@@ -765,7 +765,11 @@ pub async fn post_mint_quote_by_pubkey(
 
     let quotes = state
         .mint
-        .get_mint_quote_by_pubkey(request.pubkeys, request.pubkey_signatures)
+        .get_mint_quote_by_pubkey(
+            request.pubkeys,
+            request.pubkey_signatures,
+            request.only_mintable,
+        )
         .await
         .map_err(into_response)?;
 

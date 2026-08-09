@@ -186,7 +186,11 @@ impl MintConnector for DirectMintConnection {
     ) -> Result<Vec<MintQuoteResponse<String>>, Error> {
         let responses = self
             .mint
-            .get_mint_quote_by_pubkey(request.pubkeys, request.pubkey_signatures)
+            .get_mint_quote_by_pubkey(
+                request.pubkeys,
+                request.pubkey_signatures,
+                request.only_mintable,
+            )
             .await?;
 
         Ok(responses.into_iter().map(Into::into).collect())

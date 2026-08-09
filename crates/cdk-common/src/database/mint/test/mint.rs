@@ -1129,7 +1129,10 @@ where
     tx.add_mint_quote(other_quote.clone()).await.unwrap();
     tx.commit().await.unwrap();
 
-    let retrieved = db.get_mint_quotes_by_pubkey(&[pubkey]).await.unwrap();
+    let retrieved = db
+        .get_mint_quotes_by_pubkey(&[pubkey], false)
+        .await
+        .unwrap();
     assert_eq!(retrieved.len(), 1);
     let quote = retrieved.first().unwrap();
     assert_eq!(quote.id, mint_quote.id);
@@ -1140,7 +1143,7 @@ where
 
     // Both pubkeys at once returns both quotes.
     let both = db
-        .get_mint_quotes_by_pubkey(&[pubkey, other_pubkey])
+        .get_mint_quotes_by_pubkey(&[pubkey, other_pubkey], false)
         .await
         .unwrap();
     assert_eq!(both.len(), 2);
@@ -1148,13 +1151,17 @@ where
     // An unknown pubkey returns nothing rather than erroring.
     let unknown = SecretKey::generate().public_key();
     assert!(db
-        .get_mint_quotes_by_pubkey(&[unknown])
+        .get_mint_quotes_by_pubkey(&[unknown], false)
         .await
         .unwrap()
         .is_empty());
 
     // An empty request is not an error.
-    assert!(db.get_mint_quotes_by_pubkey(&[]).await.unwrap().is_empty());
+    assert!(db
+        .get_mint_quotes_by_pubkey(&[], false)
+        .await
+        .unwrap()
+        .is_empty());
 }
 
 /// Test deleting blinded messages

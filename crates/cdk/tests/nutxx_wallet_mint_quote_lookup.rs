@@ -196,7 +196,11 @@ impl MintConnector for DirectConnector {
     ) -> Result<Vec<MintQuoteResponse<String>>, Error> {
         let responses = self
             .0
-            .get_mint_quote_by_pubkey(request.pubkeys, request.pubkey_signatures)
+            .get_mint_quote_by_pubkey(
+                request.pubkeys,
+                request.pubkey_signatures,
+                request.only_mintable,
+            )
             .await?;
 
         Ok(responses.into_iter().map(Into::into).collect())
@@ -273,7 +277,7 @@ async fn wallet_looks_up_its_own_nut20_locked_quote() {
     let wallet = test_wallet(DirectConnector(mint)).await;
 
     let quotes = wallet
-        .fetch_mint_quotes_by_pubkey(std::slice::from_ref(&secret_key))
+        .fetch_mint_quotes_by_pubkey(std::slice::from_ref(&secret_key), false)
         .await
         .expect("lookup should succeed");
 
@@ -303,7 +307,7 @@ async fn wallet_lookup_is_empty_for_a_key_with_no_quotes() {
 
     let unrelated_key = SecretKey::generate();
     let quotes = wallet
-        .fetch_mint_quotes_by_pubkey(&[unrelated_key])
+        .fetch_mint_quotes_by_pubkey(&[unrelated_key], false)
         .await
         .expect("lookup should succeed");
 
