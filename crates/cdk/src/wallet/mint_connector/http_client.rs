@@ -650,6 +650,12 @@ where
     }
 
     /// Look up mint quotes locked to a set of NUT-20 public keys [NUT-XX]
+    ///
+    /// A malformed entry in the response - currently, a quote object missing a `"method"`
+    /// field - is skipped rather than failing the whole lookup: this call can answer for many
+    /// pubkeys at once, and one bad entry should not hide every other, perfectly valid quote
+    /// from the caller (e.g. a poller reconciling a whole key set). Each skipped entry is logged
+    /// via `tracing::warn!` with its quote id, when extractable, and the parse error.
     #[instrument(skip(self, request), fields(mint_url = %self.mint_url))]
     async fn post_mint_quote_by_pubkey(
         &self,
@@ -665,11 +671,28 @@ where
         let response: MintQuoteByPubkeyResponse<serde_json::Value> =
             self.transport_http_post(url, auth_token, &request).await?;
 
-        response
-            .quotes
-            .into_iter()
-            .map(mint_quote_value_to_response)
-            .collect()
+        let mut quotes = Vec::with_capacity(response.quotes.len());
+        for value in response.quotes {
+            // Peek the id before `value` is consumed below, so a parse failure can still be
+            // attributed to a specific quote in the warning.
+            let quote_id = value
+                .get("quote")
+                .and_then(|q| q.as_str())
+                .map(str::to_string);
+
+            match mint_quote_value_to_response(value) {
+                Ok(response) => quotes.push(response),
+                Err(e) => {
+                    tracing::warn!(
+                        "Skipping malformed mint quote {} in pubkey lookup response: {}",
+                        quote_id.as_deref().unwrap_or("<unknown>"),
+                        e
+                    );
+                }
+            }
+        }
+
+        Ok(quotes)
     }
 
     /// Mint Tokens [NUT-04]
@@ -1645,14 +1668,61 @@ mod tests {
         );
     }
 
-    /// A quote with no `"method"` field must be rejected, not silently mislabeled as bolt11.
-    /// Before the fix, `mint_quote_value_to_response` defaulted a missing method to
-    /// `PaymentMethod::BOLT11`, which would parse a paid bolt12/onchain/custom quote as an
-    /// *unpaid* `MintQuoteResponse::Bolt11` — type confusion the caller has no way to detect.
+    /// Unit contract of `mint_quote_value_to_response` itself: a quote with no `"method"` field
+    /// must be rejected, not silently mislabeled as bolt11. Before the fix, it defaulted a
+    /// missing method to `PaymentMethod::BOLT11`, which would parse a paid
+    /// bolt12/onchain/custom quote as an *unpaid* `MintQuoteResponse::Bolt11` — type confusion
+    /// the caller has no way to detect. This contract holds regardless of what
+    /// `post_mint_quote_by_pubkey` does with the error (see
+    /// `test_post_mint_quote_by_pubkey_skips_malformed_quotes` for that, batch-level behavior).
+    #[test]
+    fn test_mint_quote_value_to_response_rejects_missing_method() {
+        let value = serde_json::json!({
+            "quote": "no-method-quote-id",
+            "request": "lnbc1...",
+            "amount": 1000,
+            "amount_paid": 1000,
+            "amount_issued": 0,
+            "updated_at": 42,
+            "unit": "sat",
+            "expiry": 9999999999_u64
+        });
+
+        let result = mint_quote_value_to_response(value);
+
+        match result {
+            Err(Error::Custom(msg)) => {
+                assert!(
+                    msg.contains("no-method-quote-id"),
+                    "error should name the offending quote id, got: {msg}"
+                );
+            }
+            other => panic!(
+                "a method-less quote must be rejected, not silently treated as bolt11: {other:?}"
+            ),
+        }
+    }
+
+    /// A malformed entry (here, missing `"method"`) must not discard the rest of the batch: a
+    /// poller reconciling many quotes at once would otherwise see nothing at all for a pubkey
+    /// because of one bad quote, while that bad quote persists forever. The malformed entry is
+    /// dropped and the well-formed ones are still returned.
     #[tokio::test]
-    async fn test_post_mint_quote_by_pubkey_rejects_missing_method() {
+    async fn test_post_mint_quote_by_pubkey_skips_malformed_quotes() {
         let canned_json = serde_json::json!({
             "quotes": [
+                {
+                    "quote": "good-bolt11-quote-id",
+                    "request": "lnbc1...",
+                    "amount": 1000,
+                    "unit": "sat",
+                    "method": "bolt11",
+                    "amount_paid": 1000,
+                    "amount_issued": 0,
+                    "updated_at": 42,
+                    "state": "PAID",
+                    "expiry": 9999999999_u64
+                },
                 {
                     "quote": "no-method-quote-id",
                     "request": "lnbc1...",
@@ -1680,18 +1750,15 @@ mod tests {
             pubkey_signatures: vec![secret_key.sign(b"test-message").expect("sign")],
         };
 
-        let result = client.post_mint_quote_by_pubkey(request).await;
+        let responses = client
+            .post_mint_quote_by_pubkey(request)
+            .await
+            .expect("a malformed entry must not fail the whole lookup");
 
-        match result {
-            Err(Error::Custom(msg)) => {
-                assert!(
-                    msg.contains("no-method-quote-id"),
-                    "error should name the offending quote id, got: {msg}"
-                );
-            }
-            other => panic!(
-                "a method-less quote must be rejected, not silently treated as bolt11: {other:?}"
-            ),
+        assert_eq!(responses.len(), 1);
+        match &responses[0] {
+            MintQuoteResponse::Bolt11(r) => assert_eq!(r.quote, "good-bolt11-quote-id"),
+            other => panic!("expected the good bolt11 response, got {other:?}"),
         }
     }
 

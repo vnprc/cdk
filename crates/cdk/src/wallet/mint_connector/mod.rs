@@ -141,6 +141,9 @@ pub trait MintConnector: Debug {
     /// low-level transport call;
     /// [`Wallet::fetch_mint_quotes_by_pubkey`](crate::Wallet::fetch_mint_quotes_by_pubkey) is the
     /// signing, storing entry point most callers want.
+    ///
+    /// A malformed entry in the response (currently, a quote missing its `method` field) is
+    /// skipped with a `tracing::warn!` rather than failing the whole lookup.
     async fn post_mint_quote_by_pubkey(
         &self,
         request: MintQuoteByPubkeyRequest,
