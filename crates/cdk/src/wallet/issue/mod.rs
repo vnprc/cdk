@@ -711,12 +711,13 @@ impl Wallet {
     /// mint answers with every quote it holds for any of `secret_keys` regardless of payment
     /// method, so the result may mix Bolt11/Bolt12/Onchain/Custom responses.
     ///
-    /// Each accepted quote is reconciled into local storage exactly like
-    /// [`Wallet::fetch_mint_quote`] does: an existing record is updated in place via the shared
-    /// accounting helper and only written back when that reports a real change (or the signing
-    /// key needs stamping); an unseen quote is inserted fresh. The write is change-guarded, so
-    /// calling this repeatedly with an unchanged mint response - e.g. a periodic reconciliation
-    /// sweep - does not rewrite already-current quotes to storage on every pass.
+    /// Each accepted quote is reconciled into local storage using the same merge/accounting
+    /// logic as [`Wallet::fetch_mint_quote`]: an existing record is updated in place via the
+    /// shared accounting helper; an unseen quote is inserted fresh. Unlike `fetch_mint_quote`,
+    /// which writes back unconditionally, writes here are skipped when nothing changed (no
+    /// accounting change and the signing key already stamped) - suited to being called in a
+    /// polling loop, where an unchanged mint response should not rewrite already-current quotes
+    /// to storage on every pass.
     ///
     /// Every returned quote is validated against the keys that were actually requested before
     /// being accepted: a quote whose `pubkey` is missing, or does not match one of
