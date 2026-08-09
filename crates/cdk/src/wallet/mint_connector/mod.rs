@@ -138,8 +138,9 @@ pub trait MintConnector: Debug {
     /// Method-agnostic: quotes for any payment method locked to any of the requested pubkeys
     /// are returned together. The caller must already have signed `request.pubkey_signatures`
     /// (one signature per pubkey, over `nutxx::mint_quote_lookup_msg_to_sign`) — this is the
-    /// low-level transport call; [`Wallet::mint_quotes_by_pubkey`](crate::Wallet::mint_quotes_by_pubkey)
-    /// is the signing entry point most callers want.
+    /// low-level transport call;
+    /// [`Wallet::fetch_mint_quotes_by_pubkey`](crate::Wallet::fetch_mint_quotes_by_pubkey) is the
+    /// signing, storing entry point most callers want.
     async fn post_mint_quote_by_pubkey(
         &self,
         request: MintQuoteByPubkeyRequest,

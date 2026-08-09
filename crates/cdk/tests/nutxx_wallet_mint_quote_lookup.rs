@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used)]
 
-//! NUT-XX: in-process, end-to-end coverage of `Wallet::mint_quotes_by_pubkey` against a real
-//! `Mint`.
+//! NUT-XX: in-process, end-to-end coverage of `Wallet::fetch_mint_quotes_by_pubkey` against a
+//! real `Mint`.
 //!
 //! <https://github.com/cashubtc/nuts/blob/get-quotes-by-pubkeys/xx.md>
 //!
@@ -93,8 +93,8 @@ async fn locked_quote(mint: &Mint, pubkey: PublicKey) {
 }
 
 /// A minimal in-process `MintConnector` wrapping a `Mint` directly (no HTTP/JSON), implementing
-/// only what `Wallet::mint_quotes_by_pubkey` needs: `get_mint_info` (to learn the mint's NUT-06
-/// pubkey) and `post_mint_quote_by_pubkey` (the lookup itself). Every other method is
+/// only what `Wallet::fetch_mint_quotes_by_pubkey` needs: `get_mint_info` (to learn the mint's
+/// NUT-06 pubkey) and `post_mint_quote_by_pubkey` (the lookup itself). Every other method is
 /// unimplemented - this connector exists to exercise NUT-XX only.
 struct DirectConnector(Mint);
 
@@ -132,7 +132,7 @@ impl MintConnector for DirectConnector {
         unimplemented!("not exercised by the NUT-XX lookup test")
     }
 
-    /// `load_mint_info` (used by `mint_quotes_by_pubkey` to find the mint's NUT-06 pubkey)
+    /// `load_mint_info` (used by `fetch_mint_quotes_by_pubkey` to find the mint's NUT-06 pubkey)
     /// refreshes keysets alongside mint info as part of its normal metadata-cache flow. An
     /// empty keyset list keeps that refresh a no-op without needing a real `get_mint_keyset`.
     async fn get_mint_keysets(&self) -> Result<KeysetResponse, Error> {
@@ -262,6 +262,8 @@ async fn test_wallet(connector: DirectConnector) -> Wallet {
 
 /// The wallet signs its own lookup challenge, the mint verifies it, and the wallet gets back
 /// the quote it locked to its own key - the full round trip a reconciling caller relies on.
+/// The lookup also stores the quote locally with its signing key stamped, since callers like
+/// the sweeper rely on this method to populate the wallet database, not just report results.
 #[tokio::test]
 async fn wallet_looks_up_its_own_nut20_locked_quote() {
     let mint = test_mint().await;
@@ -271,15 +273,25 @@ async fn wallet_looks_up_its_own_nut20_locked_quote() {
     let wallet = test_wallet(DirectConnector(mint)).await;
 
     let quotes = wallet
-        .mint_quotes_by_pubkey(&[secret_key])
+        .fetch_mint_quotes_by_pubkey(std::slice::from_ref(&secret_key))
         .await
         .expect("lookup should succeed");
 
     assert_eq!(quotes.len(), 1);
     assert_eq!(
-        quotes[0].method(),
+        quotes[0].payment_method,
         PaymentMethod::Known(KnownMethod::Bolt11)
     );
+    assert_eq!(quotes[0].secret_key, Some(secret_key));
+
+    // The lookup must have persisted the quote, not just returned it in memory.
+    let stored = wallet
+        .localstore
+        .get_mint_quote(&quotes[0].id)
+        .await
+        .expect("localstore read")
+        .expect("quote should be stored locally after lookup");
+    assert_eq!(stored, quotes[0]);
 }
 
 /// A key with no locked quotes gets back an empty list, not an error - the mint's signature
@@ -291,7 +303,7 @@ async fn wallet_lookup_is_empty_for_a_key_with_no_quotes() {
 
     let unrelated_key = SecretKey::generate();
     let quotes = wallet
-        .mint_quotes_by_pubkey(&[unrelated_key])
+        .fetch_mint_quotes_by_pubkey(&[unrelated_key])
         .await
         .expect("lookup should succeed");
 
