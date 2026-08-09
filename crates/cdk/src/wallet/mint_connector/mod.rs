@@ -143,7 +143,9 @@ pub trait MintConnector: Debug {
     /// signing, storing entry point most callers want.
     ///
     /// A malformed entry in the response (currently, a quote missing its `method` field) is
-    /// skipped with a `tracing::warn!` rather than failing the whole lookup.
+    /// skipped with a `tracing::warn!` rather than failing the whole lookup. As a consequence,
+    /// a response whose entries are all malformed yields `Ok(vec![])`, indistinguishable from
+    /// a pubkey with no quotes except by the emitted warnings (per-entry plus a summary count).
     async fn post_mint_quote_by_pubkey(
         &self,
         request: MintQuoteByPubkeyRequest,

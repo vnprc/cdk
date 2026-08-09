@@ -655,7 +655,12 @@ where
     /// field - is skipped rather than failing the whole lookup: this call can answer for many
     /// pubkeys at once, and one bad entry should not hide every other, perfectly valid quote
     /// from the caller (e.g. a poller reconciling a whole key set). Each skipped entry is logged
-    /// via `tracing::warn!` with its quote id, when extractable, and the parse error.
+    /// via `tracing::warn!` with its quote id, when extractable, and the parse error, plus one
+    /// summary `tracing::warn!` with the skipped/total counts for the call.
+    ///
+    /// Consequence worth knowing: a response whose entries are ALL malformed yields
+    /// `Ok(vec![])`, indistinguishable from a pubkey that genuinely has no quotes except by
+    /// those warnings - a caller alerting on "nothing to reconcile" should also watch for them.
     #[instrument(skip(self, request), fields(mint_url = %self.mint_url))]
     async fn post_mint_quote_by_pubkey(
         &self,
@@ -671,7 +676,8 @@ where
         let response: MintQuoteByPubkeyResponse<serde_json::Value> =
             self.transport_http_post(url, auth_token, &request).await?;
 
-        let mut quotes = Vec::with_capacity(response.quotes.len());
+        let total = response.quotes.len();
+        let mut quotes = Vec::with_capacity(total);
         for value in response.quotes {
             // Peek the id before `value` is consumed below, so a parse failure can still be
             // attributed to a specific quote in the warning.
@@ -690,6 +696,17 @@ where
                     );
                 }
             }
+        }
+
+        let skipped = total - quotes.len();
+        if skipped > 0 {
+            // One summary line a poller can alert on; without it, an all-malformed response
+            // degrades to an Ok(empty) that reads exactly like "no quotes outstanding".
+            tracing::warn!(
+                "Pubkey quote lookup skipped {} of {} response entries as malformed",
+                skipped,
+                total
+            );
         }
 
         Ok(quotes)
@@ -1762,6 +1779,59 @@ mod tests {
             MintQuoteResponse::Bolt11(r) => assert_eq!(r.quote, "good-bolt11-quote-id"),
             other => panic!("expected the good bolt11 response, got {other:?}"),
         }
+    }
+
+    /// Pins the documented edge case: a response whose entries are ALL malformed collapses to
+    /// `Ok(vec![])` - the same value a quote-less pubkey returns. Callers can only tell the two
+    /// apart by the emitted warnings, which is why the doc comment tells them to watch for those.
+    #[tokio::test]
+    async fn test_post_mint_quote_by_pubkey_all_malformed_yields_empty_ok() {
+        let canned_json = serde_json::json!({
+            "quotes": [
+                {
+                    "quote": "no-method-a",
+                    "request": "lnbc1...",
+                    "amount": 1000,
+                    "amount_paid": 1000,
+                    "amount_issued": 0,
+                    "updated_at": 42,
+                    "unit": "sat",
+                    "expiry": 9999999999_u64
+                },
+                {
+                    "quote": "no-method-b",
+                    "request": "lnbc2...",
+                    "amount": 500,
+                    "amount_paid": 500,
+                    "amount_issued": 0,
+                    "updated_at": 43,
+                    "unit": "sat",
+                    "expiry": 9999999999_u64
+                }
+            ]
+        })
+        .to_string();
+
+        let transport = MockTransport {
+            post_response: Arc::new(Mutex::new(Some(canned_json))),
+            ..Default::default()
+        };
+        let mint_url = MintUrl::from_str("https://mint.example.com").expect("parse url");
+        let client = HttpClient::with_transport(mint_url, transport, None);
+
+        let secret_key = crate::nuts::SecretKey::generate();
+        let request = MintQuoteByPubkeyRequest {
+            pubkeys: vec![secret_key.public_key()],
+            pubkey_signatures: vec![secret_key.sign(b"test-message").expect("sign")],
+            only_mintable: false,
+        };
+
+        let responses = client
+            .post_mint_quote_by_pubkey(request)
+            .await
+            .expect("an all-malformed batch degrades to empty, it does not error");
+
+        assert!(responses.is_empty());
     }
 
     /// A `"bolt12"` object must reconstruct as `MintQuoteResponse::Bolt12`, not the pre-fix
