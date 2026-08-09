@@ -82,7 +82,7 @@ where
 }
 
 fn deserialize_quote_value<T: DeserializeOwned>(value: serde_json::Value) -> Result<T, Error> {
-    serde_json::from_value(value).map_err(|e| Error::Custom(e.to_string()))
+    Ok(serde_json::from_value(value)?)
 }
 
 /// Reconstruct a [`MintQuoteResponse<String>`] from one element of a
@@ -92,19 +92,30 @@ fn deserialize_quote_value<T: DeserializeOwned>(value: serde_json::Value) -> Res
 /// `MintQuoteResponse`'s own externally tagged form (see `mint_quote_response_to_value` in
 /// `cdk-axum`), so the enum's derived `Deserialize` cannot parse it directly — it expects a
 /// single-key envelope like `{"Bolt11": {...}}`, not a flat object. Every concrete response type
-/// embeds its own `method` field, though (defaulting to bolt11 if absent, matching
-/// `MintQuoteBolt11Response`'s own back-compat default), so peeking at it is enough to pick the
-/// right variant to deserialize into: the exact inverse of the mint-side flattening.
+/// embeds its own `method` field, so peeking at it here is enough to pick the right variant to
+/// deserialize into: the exact inverse of the mint-side flattening.
+///
+/// A missing or non-string `method` is rejected as a protocol error rather than guessed at.
+/// This is deliberately stricter than each concrete type's own serde default for `method`:
+/// `MintQuoteBolt11Response` defaults a missing `method` to bolt11, and
+/// `MintQuoteBolt12Response`/`MintQuoteOnchainResponse` likewise default to their own method —
+/// but those defaults only kick in once *this* function has already committed to deserializing
+/// into that specific type, and `MintQuoteCustomResponse::method` has no default at all. Falling
+/// back to Bolt11 here, before that choice is made, would silently reinterpret a paid
+/// bolt12/onchain/custom quote's accounting fields as an unpaid Bolt11 response.
 fn mint_quote_value_to_response(
     value: serde_json::Value,
 ) -> Result<MintQuoteResponse<String>, Error> {
-    let method = value
-        .get("method")
-        .cloned()
-        .map(serde_json::from_value::<PaymentMethod>)
-        .transpose()
-        .map_err(|e| Error::Custom(e.to_string()))?
-        .unwrap_or(PaymentMethod::BOLT11);
+    let method_value = value.get("method").cloned().ok_or_else(|| {
+        Error::Custom(format!(
+            "mint quote {} response is missing a \"method\" field",
+            value
+                .get("quote")
+                .and_then(|q| q.as_str())
+                .unwrap_or("<unknown>")
+        ))
+    })?;
+    let method: PaymentMethod = serde_json::from_value(method_value)?;
 
     match method {
         PaymentMethod::Known(KnownMethod::Bolt11) => {
@@ -1632,6 +1643,156 @@ mod tests {
             post_urls.lock().expect("lock").as_slice(),
             ["https://mint.example.com/v1/mint/quote/pubkey"]
         );
+    }
+
+    /// A quote with no `"method"` field must be rejected, not silently mislabeled as bolt11.
+    /// Before the fix, `mint_quote_value_to_response` defaulted a missing method to
+    /// `PaymentMethod::BOLT11`, which would parse a paid bolt12/onchain/custom quote as an
+    /// *unpaid* `MintQuoteResponse::Bolt11` — type confusion the caller has no way to detect.
+    #[tokio::test]
+    async fn test_post_mint_quote_by_pubkey_rejects_missing_method() {
+        let canned_json = serde_json::json!({
+            "quotes": [
+                {
+                    "quote": "no-method-quote-id",
+                    "request": "lnbc1...",
+                    "amount": 1000,
+                    "amount_paid": 1000,
+                    "amount_issued": 0,
+                    "updated_at": 42,
+                    "unit": "sat",
+                    "expiry": 9999999999_u64
+                }
+            ]
+        })
+        .to_string();
+
+        let transport = MockTransport {
+            post_response: Arc::new(Mutex::new(Some(canned_json))),
+            ..Default::default()
+        };
+        let mint_url = MintUrl::from_str("https://mint.example.com").expect("parse url");
+        let client = HttpClient::with_transport(mint_url, transport, None);
+
+        let secret_key = crate::nuts::SecretKey::generate();
+        let request = MintQuoteByPubkeyRequest {
+            pubkeys: vec![secret_key.public_key()],
+            pubkey_signatures: vec![secret_key.sign(b"test-message").expect("sign")],
+        };
+
+        let result = client.post_mint_quote_by_pubkey(request).await;
+
+        match result {
+            Err(Error::Custom(msg)) => {
+                assert!(
+                    msg.contains("no-method-quote-id"),
+                    "error should name the offending quote id, got: {msg}"
+                );
+            }
+            other => panic!(
+                "a method-less quote must be rejected, not silently treated as bolt11: {other:?}"
+            ),
+        }
+    }
+
+    /// A `"bolt12"` object must reconstruct as `MintQuoteResponse::Bolt12`, not the pre-fix
+    /// default of Bolt11.
+    #[tokio::test]
+    async fn test_post_mint_quote_by_pubkey_reconstructs_bolt12() {
+        let pubkey = crate::nuts::SecretKey::generate().public_key();
+        let canned_json = serde_json::json!({
+            "quotes": [
+                {
+                    "quote": "bolt12-quote-id",
+                    "request": "lno1...",
+                    "method": "bolt12",
+                    "amount": 500,
+                    "unit": "sat",
+                    "expiry": 9999999999_u64,
+                    "pubkey": pubkey.to_hex(),
+                    "amount_paid": 500,
+                    "amount_issued": 0,
+                    "updated_at": 5
+                }
+            ]
+        })
+        .to_string();
+
+        let transport = MockTransport {
+            post_response: Arc::new(Mutex::new(Some(canned_json))),
+            ..Default::default()
+        };
+        let mint_url = MintUrl::from_str("https://mint.example.com").expect("parse url");
+        let client = HttpClient::with_transport(mint_url, transport, None);
+
+        let secret_key = crate::nuts::SecretKey::generate();
+        let request = MintQuoteByPubkeyRequest {
+            pubkeys: vec![secret_key.public_key()],
+            pubkey_signatures: vec![secret_key.sign(b"test-message").expect("sign")],
+        };
+
+        let responses = client
+            .post_mint_quote_by_pubkey(request)
+            .await
+            .expect("post_mint_quote_by_pubkey should succeed");
+
+        assert_eq!(responses.len(), 1);
+        match &responses[0] {
+            MintQuoteResponse::Bolt12(r) => {
+                assert_eq!(r.quote, "bolt12-quote-id");
+                assert_eq!(r.amount_paid, cdk_common::Amount::from(500));
+            }
+            other => panic!("expected bolt12 response, got {other:?}"),
+        }
+    }
+
+    /// An `"onchain"` object must reconstruct as `MintQuoteResponse::Onchain`, not the pre-fix
+    /// default of Bolt11.
+    #[tokio::test]
+    async fn test_post_mint_quote_by_pubkey_reconstructs_onchain() {
+        let pubkey = crate::nuts::SecretKey::generate().public_key();
+        let canned_json = serde_json::json!({
+            "quotes": [
+                {
+                    "quote": "onchain-quote-id",
+                    "request": "bc1qexample",
+                    "method": "onchain",
+                    "unit": "sat",
+                    "pubkey": pubkey.to_hex(),
+                    "amount_paid": 750,
+                    "amount_issued": 0,
+                    "updated_at": 3
+                }
+            ]
+        })
+        .to_string();
+
+        let transport = MockTransport {
+            post_response: Arc::new(Mutex::new(Some(canned_json))),
+            ..Default::default()
+        };
+        let mint_url = MintUrl::from_str("https://mint.example.com").expect("parse url");
+        let client = HttpClient::with_transport(mint_url, transport, None);
+
+        let secret_key = crate::nuts::SecretKey::generate();
+        let request = MintQuoteByPubkeyRequest {
+            pubkeys: vec![secret_key.public_key()],
+            pubkey_signatures: vec![secret_key.sign(b"test-message").expect("sign")],
+        };
+
+        let responses = client
+            .post_mint_quote_by_pubkey(request)
+            .await
+            .expect("post_mint_quote_by_pubkey should succeed");
+
+        assert_eq!(responses.len(), 1);
+        match &responses[0] {
+            MintQuoteResponse::Onchain(r) => {
+                assert_eq!(r.quote, "onchain-quote-id");
+                assert_eq!(r.amount_paid, cdk_common::Amount::from(750));
+            }
+            other => panic!("expected onchain response, got {other:?}"),
+        }
     }
 
     #[tokio::test]
