@@ -888,7 +888,7 @@ mod tests {
 
     use super::*;
     use crate::wallet::test_utils::{
-        create_test_db, create_test_wallet_with_mock, MockMintConnector,
+        create_test_db, create_test_wallet_with_mock, CountingWalletDb, MockMintConnector,
     };
 
     #[test]
@@ -1111,20 +1111,23 @@ mod tests {
     /// caller that polls this method on an interval must not rewrite unchanged history to disk
     /// on every pass.
     ///
-    /// This asserts observable idempotency - the stored record is identical across both calls -
-    /// and confirms the connector was actually hit twice (the guard is on the write, not the
-    /// network call). It does not count `add_mint_quote` invocations directly: `WalletDatabase`
-    /// is an ~50-method trait, and a call-counting wrapper for it was judged too large for the
-    /// value it would add on top of this equality check plus the existing direct coverage of
-    /// `apply_mint_quote_response`'s bool return.
+    /// A value-only check (asserting the stored record is identical across calls) would pass
+    /// whether or not the guard actually exists, since an unconditional overwrite with the same
+    /// data is indistinguishable from a skipped write when you can only observe the result. To
+    /// get a real regression net, this wraps the localstore in [`CountingWalletDb`] and asserts
+    /// the `add_mint_quote` call count directly: 1 after two identical calls, not 2.
+    ///
+    /// A positive control closes the loop: a *changed* response (bumped `amount_paid` /
+    /// `updated_at`) between calls must still produce a second write, proving the guard is
+    /// conditional on an actual change rather than latching off after the first call.
     #[tokio::test]
     async fn fetch_mint_quotes_by_pubkey_is_idempotent_for_an_unchanged_response() {
-        let db = create_test_db().await;
+        let counting_db = Arc::new(CountingWalletDb::new(create_test_db().await));
         let mock = Arc::new(MockMintConnector::new());
-        let wallet = create_test_wallet_with_mock(db, mock.clone()).await;
+        let wallet = create_test_wallet_with_mock(counting_db.clone(), mock.clone()).await;
 
         let secret_key = SecretKey::generate();
-        let canned_response = || {
+        let canned_response = |amount_paid: u64, updated_at: u64| {
             vec![MintQuoteResponse::Bolt11(
                 cdk_common::nut23::MintQuoteBolt11Response {
                     quote: "repeat-quote-id".to_string(),
@@ -1132,9 +1135,9 @@ mod tests {
                     amount: Some(Amount::from(100)),
                     unit: Some(CurrencyUnit::Sat),
                     method: PaymentMethod::Known(KnownMethod::Bolt11),
-                    amount_paid: Amount::from(100),
+                    amount_paid: Amount::from(amount_paid),
                     amount_issued: Amount::ZERO,
-                    updated_at: 10,
+                    updated_at,
                     state: MintQuoteState::Paid,
                     expiry: None,
                     pubkey: Some(secret_key.public_key()),
@@ -1142,13 +1145,18 @@ mod tests {
             )]
         };
 
-        mock.set_mint_quote_by_pubkey_response(Ok(canned_response()));
+        mock.set_mint_quote_by_pubkey_response(Ok(canned_response(100, 10)));
         let first = wallet
             .fetch_mint_quotes_by_pubkey(std::slice::from_ref(&secret_key))
             .await
             .expect("first lookup should succeed");
+        assert_eq!(
+            counting_db.add_mint_quote_calls(),
+            1,
+            "the first sighting of a quote must be stored"
+        );
 
-        mock.set_mint_quote_by_pubkey_response(Ok(canned_response()));
+        mock.set_mint_quote_by_pubkey_response(Ok(canned_response(100, 10)));
         let second = wallet
             .fetch_mint_quotes_by_pubkey(std::slice::from_ref(&secret_key))
             .await
@@ -1159,6 +1167,12 @@ mod tests {
             "an unchanged mint response must not perturb the stored record"
         );
         assert_eq!(
+            counting_db.add_mint_quote_calls(),
+            1,
+            "an unchanged response must not trigger a second write - this is the actual \
+             regression guard; the equality check above would pass even without it"
+        );
+        assert_eq!(
             mock.captured_mint_quote_by_pubkey_requests
                 .lock()
                 .unwrap()
@@ -1167,13 +1181,38 @@ mod tests {
             "the connector should still be called on every poll; only the write is guarded"
         );
 
+        // Positive control: a genuinely changed response must still write through, so the guard
+        // is provably conditional rather than a latch that skips every write after the first.
+        mock.set_mint_quote_by_pubkey_response(Ok(canned_response(150, 11)));
+        let third = wallet
+            .fetch_mint_quotes_by_pubkey(std::slice::from_ref(&secret_key))
+            .await
+            .expect("third lookup should succeed");
+        assert_eq!(third[0].amount_paid, Amount::from(150));
+        assert_eq!(
+            counting_db.add_mint_quote_calls(),
+            2,
+            "a genuinely changed response must trigger a second write"
+        );
+
+        // Compare specific fields rather than full struct equality: `add_mint_quote` is an
+        // optimistic-concurrency write (see its `version`/`expected_version` handling in the SQL
+        // layer) that bumps the stored version past what the in-memory `quote` it was called
+        // with still shows, since the increment happens server-side and isn't reflected back
+        // into the caller's struct. That's expected - callers don't need the new version unless
+        // they intend another conditional write - but it does mean a fresh read's `version`
+        // legitimately differs from the pre-write value still sitting in `third[0]`.
         let stored = wallet
             .localstore
             .get_mint_quote("repeat-quote-id")
             .await
             .expect("localstore read")
             .expect("quote should be stored");
-        assert_eq!(stored, first[0]);
+        assert_eq!(stored.amount_paid, third[0].amount_paid);
+        assert_eq!(stored.amount_issued, third[0].amount_issued);
+        assert_eq!(stored.updated_at, third[0].updated_at);
+        assert_eq!(stored.state, third[0].state);
+        assert_eq!(stored.secret_key, third[0].secret_key);
     }
 
     #[test]

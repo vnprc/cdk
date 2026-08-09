@@ -4,18 +4,23 @@
 
 use std::collections::BTreeMap;
 use std::str::FromStr;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use bip39::Mnemonic;
+use bitcoin::bip32::DerivationPath;
 use cdk_common::database::WalletDatabase;
 use cdk_common::mint_url::MintUrl;
 use cdk_common::nut00::KnownMethod;
 use cdk_common::nuts::{
     CurrencyUnit, Id, KeySet, KeySetInfo, Keys, KeysetResponse, MeltMethodSettings, MintInfo,
-    MintMethodSettings, MintVersion, MppMethodSettings, Proof,
+    MintMethodSettings, MintVersion, MppMethodSettings, Proof, PublicKey, SpendingConditions,
 };
 use cdk_common::nutxx::MintQuoteByPubkeyRequest;
-use cdk_common::wallet::{MeltQuote, MintQuote};
+use cdk_common::wallet::{
+    MeltQuote, MintQuote, P2PKSigningKey, ProofInfo, Transaction, TransactionDirection,
+    TransactionId, WalletSaga,
+};
 use cdk_common::{
     Amount, CheckStateRequest, CheckStateResponse, MeltQuoteCreateResponse, MeltQuoteRequest,
     MeltQuoteResponse, MeltRequest, MintQuoteRequest, MintQuoteResponse, MintRequest, MintResponse,
@@ -928,5 +933,387 @@ impl MintConnector for MockMintConnector {
             .unwrap()
             .pop_front()
             .expect("MockMintConnector: post_batch_mint called without configured response")
+    }
+}
+
+/// Test-only [`WalletDatabase`] wrapper that forwards every call to an inner database unchanged,
+/// while counting how many times `add_mint_quote` is called.
+///
+/// This exists to give change-guarded write paths (e.g.
+/// `Wallet::fetch_mint_quotes_by_pubkey`'s guard against rewriting an unchanged mint response) a
+/// real regression witness: a test built only on the *value* stored is satisfied whether or not
+/// the guard exists, since an unconditional overwrite with the same data is invisible from the
+/// outside. Counting the underlying write call closes that gap.
+///
+/// `WalletDatabase` is a large (~50-method) trait, so this is a mechanical, one-time delegation
+/// cost - the same trade `get_mint_info_calls` already makes on [`MockMintConnector`] above, just
+/// for the storage side instead of the connector side.
+#[derive(Debug)]
+pub struct CountingWalletDb {
+    inner: Arc<dyn WalletDatabase<cdk_common::database::Error> + Send + Sync>,
+    /// Number of times `add_mint_quote` has been called.
+    add_mint_quote_calls: AtomicUsize,
+}
+
+impl CountingWalletDb {
+    /// Wrap `inner`, starting the `add_mint_quote` counter at zero.
+    pub fn new(inner: Arc<dyn WalletDatabase<cdk_common::database::Error> + Send + Sync>) -> Self {
+        Self {
+            inner,
+            add_mint_quote_calls: AtomicUsize::new(0),
+        }
+    }
+
+    /// Number of `add_mint_quote` calls observed so far.
+    pub fn add_mint_quote_calls(&self) -> usize {
+        self.add_mint_quote_calls.load(Ordering::SeqCst)
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+impl WalletDatabase<cdk_common::database::Error> for CountingWalletDb {
+    async fn get_mint(
+        &self,
+        mint_url: MintUrl,
+    ) -> Result<Option<MintInfo>, cdk_common::database::Error> {
+        self.inner.get_mint(mint_url).await
+    }
+
+    async fn get_mints(
+        &self,
+    ) -> Result<std::collections::HashMap<MintUrl, Option<MintInfo>>, cdk_common::database::Error>
+    {
+        self.inner.get_mints().await
+    }
+
+    async fn get_mint_keysets(
+        &self,
+        mint_url: MintUrl,
+    ) -> Result<Option<Vec<KeySetInfo>>, cdk_common::database::Error> {
+        self.inner.get_mint_keysets(mint_url).await
+    }
+
+    async fn get_keyset_by_id(
+        &self,
+        keyset_id: &Id,
+    ) -> Result<Option<KeySetInfo>, cdk_common::database::Error> {
+        self.inner.get_keyset_by_id(keyset_id).await
+    }
+
+    async fn get_mint_quote(
+        &self,
+        quote_id: &str,
+    ) -> Result<Option<MintQuote>, cdk_common::database::Error> {
+        self.inner.get_mint_quote(quote_id).await
+    }
+
+    async fn get_mint_quotes(&self) -> Result<Vec<MintQuote>, cdk_common::database::Error> {
+        self.inner.get_mint_quotes().await
+    }
+
+    async fn get_unissued_mint_quotes(
+        &self,
+    ) -> Result<Vec<MintQuote>, cdk_common::database::Error> {
+        self.inner.get_unissued_mint_quotes().await
+    }
+
+    async fn get_melt_quote(
+        &self,
+        quote_id: &str,
+    ) -> Result<Option<MeltQuote>, cdk_common::database::Error> {
+        self.inner.get_melt_quote(quote_id).await
+    }
+
+    async fn get_melt_quotes(&self) -> Result<Vec<MeltQuote>, cdk_common::database::Error> {
+        self.inner.get_melt_quotes().await
+    }
+
+    async fn get_keys(&self, id: &Id) -> Result<Option<Keys>, cdk_common::database::Error> {
+        self.inner.get_keys(id).await
+    }
+
+    async fn get_proofs(
+        &self,
+        mint_url: Option<MintUrl>,
+        unit: Option<CurrencyUnit>,
+        state: Option<Vec<State>>,
+        spending_conditions: Option<Vec<SpendingConditions>>,
+    ) -> Result<Vec<ProofInfo>, cdk_common::database::Error> {
+        self.inner
+            .get_proofs(mint_url, unit, state, spending_conditions)
+            .await
+    }
+
+    async fn get_proofs_by_ys(
+        &self,
+        ys: Vec<PublicKey>,
+    ) -> Result<Vec<ProofInfo>, cdk_common::database::Error> {
+        self.inner.get_proofs_by_ys(ys).await
+    }
+
+    async fn get_balance(
+        &self,
+        mint_url: Option<MintUrl>,
+        unit: Option<CurrencyUnit>,
+        state: Option<Vec<State>>,
+    ) -> Result<u64, cdk_common::database::Error> {
+        self.inner.get_balance(mint_url, unit, state).await
+    }
+
+    async fn get_transaction(
+        &self,
+        transaction_id: TransactionId,
+    ) -> Result<Option<Transaction>, cdk_common::database::Error> {
+        self.inner.get_transaction(transaction_id).await
+    }
+
+    async fn list_transactions(
+        &self,
+        mint_url: Option<MintUrl>,
+        direction: Option<TransactionDirection>,
+        unit: Option<CurrencyUnit>,
+    ) -> Result<Vec<Transaction>, cdk_common::database::Error> {
+        self.inner
+            .list_transactions(mint_url, direction, unit)
+            .await
+    }
+
+    async fn update_proofs(
+        &self,
+        added: Vec<ProofInfo>,
+        removed_ys: Vec<PublicKey>,
+    ) -> Result<(), cdk_common::database::Error> {
+        self.inner.update_proofs(added, removed_ys).await
+    }
+
+    async fn update_proofs_state(
+        &self,
+        ys: Vec<PublicKey>,
+        state: State,
+    ) -> Result<(), cdk_common::database::Error> {
+        self.inner.update_proofs_state(ys, state).await
+    }
+
+    async fn add_transaction(
+        &self,
+        transaction: Transaction,
+    ) -> Result<(), cdk_common::database::Error> {
+        self.inner.add_transaction(transaction).await
+    }
+
+    async fn update_mint_url(
+        &self,
+        old_mint_url: MintUrl,
+        new_mint_url: MintUrl,
+    ) -> Result<(), cdk_common::database::Error> {
+        self.inner.update_mint_url(old_mint_url, new_mint_url).await
+    }
+
+    async fn increment_keyset_counter(
+        &self,
+        keyset_id: &Id,
+        count: u32,
+    ) -> Result<u32, cdk_common::database::Error> {
+        self.inner.increment_keyset_counter(keyset_id, count).await
+    }
+
+    async fn add_mint(
+        &self,
+        mint_url: MintUrl,
+        mint_info: Option<MintInfo>,
+    ) -> Result<(), cdk_common::database::Error> {
+        self.inner.add_mint(mint_url, mint_info).await
+    }
+
+    async fn remove_mint(&self, mint_url: MintUrl) -> Result<(), cdk_common::database::Error> {
+        self.inner.remove_mint(mint_url).await
+    }
+
+    async fn add_mint_keysets(
+        &self,
+        mint_url: MintUrl,
+        keysets: Vec<KeySetInfo>,
+    ) -> Result<(), cdk_common::database::Error> {
+        self.inner.add_mint_keysets(mint_url, keysets).await
+    }
+
+    /// The counted call: increments before delegating, so the count reflects calls attempted
+    /// even if the inner database goes on to fail.
+    async fn add_mint_quote(&self, quote: MintQuote) -> Result<(), cdk_common::database::Error> {
+        self.add_mint_quote_calls.fetch_add(1, Ordering::SeqCst);
+        self.inner.add_mint_quote(quote).await
+    }
+
+    async fn remove_mint_quote(&self, quote_id: &str) -> Result<(), cdk_common::database::Error> {
+        self.inner.remove_mint_quote(quote_id).await
+    }
+
+    async fn add_melt_quote(&self, quote: MeltQuote) -> Result<(), cdk_common::database::Error> {
+        self.inner.add_melt_quote(quote).await
+    }
+
+    async fn remove_melt_quote(&self, quote_id: &str) -> Result<(), cdk_common::database::Error> {
+        self.inner.remove_melt_quote(quote_id).await
+    }
+
+    async fn add_keys(&self, keyset: KeySet) -> Result<(), cdk_common::database::Error> {
+        self.inner.add_keys(keyset).await
+    }
+
+    async fn remove_keys(&self, id: &Id) -> Result<(), cdk_common::database::Error> {
+        self.inner.remove_keys(id).await
+    }
+
+    async fn remove_transaction(
+        &self,
+        transaction_id: TransactionId,
+    ) -> Result<(), cdk_common::database::Error> {
+        self.inner.remove_transaction(transaction_id).await
+    }
+
+    async fn add_saga(&self, saga: WalletSaga) -> Result<(), cdk_common::database::Error> {
+        self.inner.add_saga(saga).await
+    }
+
+    async fn get_saga(
+        &self,
+        id: &uuid::Uuid,
+    ) -> Result<Option<WalletSaga>, cdk_common::database::Error> {
+        self.inner.get_saga(id).await
+    }
+
+    async fn update_saga(&self, saga: WalletSaga) -> Result<bool, cdk_common::database::Error> {
+        self.inner.update_saga(saga).await
+    }
+
+    async fn delete_saga(&self, id: &uuid::Uuid) -> Result<(), cdk_common::database::Error> {
+        self.inner.delete_saga(id).await
+    }
+
+    async fn get_incomplete_sagas(&self) -> Result<Vec<WalletSaga>, cdk_common::database::Error> {
+        self.inner.get_incomplete_sagas().await
+    }
+
+    async fn reserve_proofs(
+        &self,
+        ys: Vec<PublicKey>,
+        operation_id: &uuid::Uuid,
+    ) -> Result<(), cdk_common::database::Error> {
+        self.inner.reserve_proofs(ys, operation_id).await
+    }
+
+    async fn release_proofs(
+        &self,
+        operation_id: &uuid::Uuid,
+    ) -> Result<(), cdk_common::database::Error> {
+        self.inner.release_proofs(operation_id).await
+    }
+
+    async fn get_reserved_proofs(
+        &self,
+        operation_id: &uuid::Uuid,
+    ) -> Result<Vec<ProofInfo>, cdk_common::database::Error> {
+        self.inner.get_reserved_proofs(operation_id).await
+    }
+
+    async fn reserve_melt_quote(
+        &self,
+        quote_id: &str,
+        operation_id: &uuid::Uuid,
+    ) -> Result<(), cdk_common::database::Error> {
+        self.inner.reserve_melt_quote(quote_id, operation_id).await
+    }
+
+    async fn release_melt_quote(
+        &self,
+        operation_id: &uuid::Uuid,
+    ) -> Result<(), cdk_common::database::Error> {
+        self.inner.release_melt_quote(operation_id).await
+    }
+
+    async fn reserve_mint_quote(
+        &self,
+        quote_id: &str,
+        operation_id: &uuid::Uuid,
+    ) -> Result<(), cdk_common::database::Error> {
+        self.inner.reserve_mint_quote(quote_id, operation_id).await
+    }
+
+    async fn release_mint_quote(
+        &self,
+        operation_id: &uuid::Uuid,
+    ) -> Result<(), cdk_common::database::Error> {
+        self.inner.release_mint_quote(operation_id).await
+    }
+
+    async fn kv_read(
+        &self,
+        primary_namespace: &str,
+        secondary_namespace: &str,
+        key: &str,
+    ) -> Result<Option<Vec<u8>>, cdk_common::database::Error> {
+        self.inner
+            .kv_read(primary_namespace, secondary_namespace, key)
+            .await
+    }
+
+    async fn kv_list(
+        &self,
+        primary_namespace: &str,
+        secondary_namespace: &str,
+    ) -> Result<Vec<String>, cdk_common::database::Error> {
+        self.inner
+            .kv_list(primary_namespace, secondary_namespace)
+            .await
+    }
+
+    async fn kv_write(
+        &self,
+        primary_namespace: &str,
+        secondary_namespace: &str,
+        key: &str,
+        value: &[u8],
+    ) -> Result<(), cdk_common::database::Error> {
+        self.inner
+            .kv_write(primary_namespace, secondary_namespace, key, value)
+            .await
+    }
+
+    async fn kv_remove(
+        &self,
+        primary_namespace: &str,
+        secondary_namespace: &str,
+        key: &str,
+    ) -> Result<(), cdk_common::database::Error> {
+        self.inner
+            .kv_remove(primary_namespace, secondary_namespace, key)
+            .await
+    }
+
+    async fn add_p2pk_key(
+        &self,
+        pubkey: &PublicKey,
+        derivation_path: DerivationPath,
+        derivation_index: u32,
+    ) -> Result<(), cdk_common::database::Error> {
+        self.inner
+            .add_p2pk_key(pubkey, derivation_path, derivation_index)
+            .await
+    }
+
+    async fn get_p2pk_key(
+        &self,
+        pubkey: &PublicKey,
+    ) -> Result<Option<P2PKSigningKey>, cdk_common::database::Error> {
+        self.inner.get_p2pk_key(pubkey).await
+    }
+
+    async fn list_p2pk_keys(&self) -> Result<Vec<P2PKSigningKey>, cdk_common::database::Error> {
+        self.inner.list_p2pk_keys().await
+    }
+
+    async fn latest_p2pk(&self) -> Result<Option<P2PKSigningKey>, cdk_common::database::Error> {
+        self.inner.latest_p2pk().await
     }
 }
