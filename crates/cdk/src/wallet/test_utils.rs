@@ -14,6 +14,7 @@ use cdk_common::nuts::{
     CurrencyUnit, Id, KeySet, KeySetInfo, Keys, KeysetResponse, MeltMethodSettings, MintInfo,
     MintMethodSettings, MintVersion, MppMethodSettings, Proof,
 };
+use cdk_common::nutxx::MintQuoteByPubkeyRequest;
 use cdk_common::wallet::{MeltQuote, MintQuote};
 use cdk_common::{
     Amount, CheckStateRequest, CheckStateResponse, MeltQuoteCreateResponse, MeltQuoteRequest,
@@ -470,6 +471,11 @@ pub struct MockMintConnector {
     pub post_batch_mint_responses: Mutex<std::collections::VecDeque<Result<MintResponse, Error>>>,
     /// Captured post_batch_mint requests.
     pub post_batch_mint_requests: Mutex<Vec<(PaymentMethod, BatchMintRequest<String>)>>,
+    /// Response for post_mint_quote_by_pubkey calls
+    pub post_mint_quote_by_pubkey_response:
+        Mutex<Option<Result<Vec<MintQuoteResponse<String>>, Error>>>,
+    /// Captured post_mint_quote_by_pubkey requests for test verification.
+    pub captured_mint_quote_by_pubkey_requests: Mutex<Vec<MintQuoteByPubkeyRequest>>,
     /// Response for post_swap calls
     pub post_swap_response: Mutex<Option<Result<SwapResponse, Error>>>,
     /// Queue of responses for successive post_swap calls.
@@ -517,6 +523,8 @@ impl MockMintConnector {
             post_mint_requests: Mutex::new(Vec::new()),
             post_batch_mint_responses: Mutex::new(std::collections::VecDeque::new()),
             post_batch_mint_requests: Mutex::new(Vec::new()),
+            post_mint_quote_by_pubkey_response: Mutex::new(None),
+            captured_mint_quote_by_pubkey_requests: Mutex::new(Vec::new()),
             post_swap_response: Mutex::new(None),
             post_swap_responses: Mutex::new(std::collections::VecDeque::new()),
             captured_swap_requests: Mutex::new(Vec::new()),
@@ -578,6 +586,13 @@ impl MockMintConnector {
             Ok(mint_info) => *self.mint_info.lock().unwrap() = mint_info,
             Err(_) => unimplemented!("error responses for mint info state are not supported"),
         }
+    }
+
+    pub fn set_mint_quote_by_pubkey_response(
+        &self,
+        response: Result<Vec<MintQuoteResponse<String>>, Error>,
+    ) {
+        *self.post_mint_quote_by_pubkey_response.lock().unwrap() = Some(response);
     }
 
     pub fn set_active_keyset(&self, keyset: KeySet) {
@@ -761,6 +776,24 @@ impl MintConnector for MockMintConnector {
         _quote_id: &str,
     ) -> Result<MintQuoteResponse<String>, Error> {
         unimplemented!()
+    }
+
+    async fn post_mint_quote_by_pubkey(
+        &self,
+        request: MintQuoteByPubkeyRequest,
+    ) -> Result<Vec<MintQuoteResponse<String>>, Error> {
+        self.captured_mint_quote_by_pubkey_requests
+            .lock()
+            .unwrap()
+            .push(request);
+
+        self.post_mint_quote_by_pubkey_response
+            .lock()
+            .unwrap()
+            .take()
+            .expect(
+                "MockMintConnector: post_mint_quote_by_pubkey called without configured response",
+            )
     }
 
     async fn post_mint(

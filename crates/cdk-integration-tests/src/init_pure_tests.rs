@@ -14,6 +14,7 @@ use cdk::amount::SplitTarget;
 use cdk::cdk_database::{self, WalletDatabase};
 use cdk::mint::{MintBuilder, MintMeltLimits};
 use cdk::nuts::nut00::ProofsMethods;
+use cdk::nuts::nutxx::MintQuoteByPubkeyRequest;
 use cdk::nuts::{
     BatchCheckMintQuoteRequest, BatchMintRequest, CheckStateRequest, CheckStateResponse,
     CurrencyUnit, Id, KeySet, KeysetResponse, MeltRequest, MintInfo, MintRequest, MintResponse,
@@ -177,6 +178,18 @@ impl MintConnector for DirectMintConnection {
                 _ => Err(Error::InvalidPaymentMethod),
             },
         }
+    }
+
+    async fn post_mint_quote_by_pubkey(
+        &self,
+        request: MintQuoteByPubkeyRequest,
+    ) -> Result<Vec<MintQuoteResponse<String>>, Error> {
+        let responses = self
+            .mint
+            .get_mint_quote_by_pubkey(request.pubkeys, request.pubkey_signatures)
+            .await?;
+
+        Ok(responses.into_iter().map(Into::into).collect())
     }
 
     async fn post_mint(

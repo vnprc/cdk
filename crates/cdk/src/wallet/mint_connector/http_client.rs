@@ -4,6 +4,7 @@ use std::sync::{Arc, RwLock as StdRwLock};
 
 use async_trait::async_trait;
 use cdk_common::auth::oidc::{OidcHttpResponse, OidcHttpTransport};
+use cdk_common::nutxx::{MintQuoteByPubkeyRequest, MintQuoteByPubkeyResponse};
 use cdk_common::{
     nut19, MeltQuoteCreateResponse, MeltQuoteRequest, MeltQuoteResponse, Method,
     MintQuoteBolt11Response, MintQuoteBolt12Response, MintQuoteCustomResponse,
@@ -78,6 +79,48 @@ where
 {
     fill_response_methods(&mut value, method);
     serde_json::from_value(value).map_err(|e| Error::Custom(e.to_string()))
+}
+
+fn deserialize_quote_value<T: DeserializeOwned>(value: serde_json::Value) -> Result<T, Error> {
+    serde_json::from_value(value).map_err(|e| Error::Custom(e.to_string()))
+}
+
+/// Reconstruct a [`MintQuoteResponse<String>`] from one element of a
+/// [`MintQuoteByPubkeyResponse`] `quotes` array.
+///
+/// The mint flattens each quote to its bare NUT-04 response object rather than
+/// `MintQuoteResponse`'s own externally tagged form (see `mint_quote_response_to_value` in
+/// `cdk-axum`), so the enum's derived `Deserialize` cannot parse it directly — it expects a
+/// single-key envelope like `{"Bolt11": {...}}`, not a flat object. Every concrete response type
+/// embeds its own `method` field, though (defaulting to bolt11 if absent, matching
+/// `MintQuoteBolt11Response`'s own back-compat default), so peeking at it is enough to pick the
+/// right variant to deserialize into: the exact inverse of the mint-side flattening.
+fn mint_quote_value_to_response(
+    value: serde_json::Value,
+) -> Result<MintQuoteResponse<String>, Error> {
+    let method = value
+        .get("method")
+        .cloned()
+        .map(serde_json::from_value::<PaymentMethod>)
+        .transpose()
+        .map_err(|e| Error::Custom(e.to_string()))?
+        .unwrap_or(PaymentMethod::BOLT11);
+
+    match method {
+        PaymentMethod::Known(KnownMethod::Bolt11) => {
+            Ok(MintQuoteResponse::Bolt11(deserialize_quote_value(value)?))
+        }
+        PaymentMethod::Known(KnownMethod::Bolt12) => {
+            Ok(MintQuoteResponse::Bolt12(deserialize_quote_value(value)?))
+        }
+        PaymentMethod::Known(KnownMethod::Onchain) => {
+            Ok(MintQuoteResponse::Onchain(deserialize_quote_value(value)?))
+        }
+        PaymentMethod::Custom(name) => Ok(MintQuoteResponse::Custom {
+            method: PaymentMethod::Custom(name),
+            response: deserialize_quote_value(value)?,
+        }),
+    }
 }
 
 /// Http Client
@@ -593,6 +636,29 @@ where
                 Ok(MintQuoteResponse::Custom { method, response })
             }
         }
+    }
+
+    /// Look up mint quotes locked to a set of NUT-20 public keys [NUT-XX]
+    #[instrument(skip(self, request), fields(mint_url = %self.mint_url))]
+    async fn post_mint_quote_by_pubkey(
+        &self,
+        request: MintQuoteByPubkeyRequest,
+    ) -> Result<Vec<MintQuoteResponse<String>>, Error> {
+        let url = self
+            .mint_url
+            .join_paths(&["v1", "mint", "quote", "pubkey"])?;
+        let auth_token = self
+            .get_auth_token(Method::Post, RoutePath::MintQuoteByPubkey)
+            .await?;
+
+        let response: MintQuoteByPubkeyResponse<serde_json::Value> =
+            self.transport_http_post(url, auth_token, &request).await?;
+
+        response
+            .quotes
+            .into_iter()
+            .map(mint_quote_value_to_response)
+            .collect()
     }
 
     /// Mint Tokens [NUT-04]
@@ -1488,6 +1554,84 @@ mod tests {
             }
             _ => panic!("expected custom response"),
         }
+    }
+
+    /// The mint answers `/v1/mint/quote/pubkey` with quotes flattened to their bare NUT-04
+    /// object (see `mint_quote_response_to_value` in `cdk-axum`), not wrapped in
+    /// `MintQuoteResponse`'s own externally tagged envelope. A response mixing a known method
+    /// (bolt11) and a custom method (paypal) must still reconstruct both correctly, and the
+    /// request must go to the method-agnostic path with no `{method}` segment in it.
+    #[tokio::test]
+    async fn test_post_mint_quote_by_pubkey_reconstructs_mixed_methods() {
+        let canned_json = serde_json::json!({
+            "quotes": [
+                {
+                    "quote": "bolt11-quote-id",
+                    "request": "lnbc1...",
+                    "amount": 1000,
+                    "unit": "sat",
+                    "method": "bolt11",
+                    "amount_paid": 1000,
+                    "amount_issued": 0,
+                    "updated_at": 42,
+                    "state": "PAID",
+                    "expiry": 9999999999_u64
+                },
+                {
+                    "quote": "custom-quote-id",
+                    "request": "paypal://pay?id=123",
+                    "method": "paypal",
+                    "amount": 500,
+                    "amount_paid": 0,
+                    "amount_issued": 0,
+                    "updated_at": 7,
+                    "unit": "sat",
+                    "expiry": 9999999999_u64
+                }
+            ]
+        })
+        .to_string();
+
+        let transport = MockTransport {
+            post_response: Arc::new(Mutex::new(Some(canned_json))),
+            ..Default::default()
+        };
+        let post_urls = transport.post_urls.clone();
+        let mint_url = MintUrl::from_str("https://mint.example.com").expect("parse url");
+        let client = HttpClient::with_transport(mint_url, transport, None);
+
+        let secret_key = crate::nuts::SecretKey::generate();
+        let request = MintQuoteByPubkeyRequest {
+            pubkeys: vec![secret_key.public_key()],
+            pubkey_signatures: vec![secret_key.sign(b"test-message").expect("sign")],
+        };
+
+        let responses = client
+            .post_mint_quote_by_pubkey(request)
+            .await
+            .expect("post_mint_quote_by_pubkey should succeed");
+
+        assert_eq!(responses.len(), 2);
+        match &responses[0] {
+            MintQuoteResponse::Bolt11(r) => {
+                assert_eq!(r.quote, "bolt11-quote-id");
+                assert_eq!(r.state, MintQuoteState::Paid);
+            }
+            other => panic!("expected bolt11 response, got {other:?}"),
+        }
+        match &responses[1] {
+            MintQuoteResponse::Custom { method, response } => {
+                assert_eq!(method, &PaymentMethod::Custom("paypal".to_string()));
+                assert_eq!(response.quote, "custom-quote-id");
+            }
+            other => panic!("expected custom response, got {other:?}"),
+        }
+
+        // No `{method}` path segment: this endpoint is method-agnostic.
+        assert_eq!(
+            post_urls.lock().expect("lock").as_slice(),
+            ["https://mint.example.com/v1/mint/quote/pubkey"]
+        );
     }
 
     #[tokio::test]

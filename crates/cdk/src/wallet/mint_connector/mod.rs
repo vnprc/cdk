@@ -4,6 +4,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use cdk_common::nutxx::MintQuoteByPubkeyRequest;
 use cdk_common::{
     AuthToken, MeltQuoteCreateResponse, MeltQuoteRequest, MeltQuoteResponse, MintQuoteRequest,
     MintQuoteResponse,
@@ -131,6 +132,18 @@ pub trait MintConnector: Debug {
         method: PaymentMethod,
         quote_id: &str,
     ) -> Result<MintQuoteResponse<String>, Error>;
+
+    /// Look up mint quotes locked to a set of NUT-20 public keys [NUT-XX]
+    ///
+    /// Method-agnostic: quotes for any payment method locked to any of the requested pubkeys
+    /// are returned together. The caller must already have signed `request.pubkey_signatures`
+    /// (one signature per pubkey, over `nutxx::mint_quote_lookup_msg_to_sign`) — this is the
+    /// low-level transport call; [`Wallet::mint_quotes_by_pubkey`](crate::Wallet::mint_quotes_by_pubkey)
+    /// is the signing entry point most callers want.
+    async fn post_mint_quote_by_pubkey(
+        &self,
+        request: MintQuoteByPubkeyRequest,
+    ) -> Result<Vec<MintQuoteResponse<String>>, Error>;
 
     /// Melt [NUT-05]
     /// Melt Quote Status
