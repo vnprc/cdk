@@ -6,16 +6,19 @@ pub(crate) mod saga;
 
 use cdk_common::nut00::KnownMethod;
 use cdk_common::nut04::MintMethodOptions;
+use cdk_common::nutxx::{
+    mint_quote_lookup_msg_to_sign, MintQuoteByPubkeyRequest, MAX_LOOKUP_PUBKEYS,
+};
 use cdk_common::{MintQuoteRequest, MintQuoteResponse, PaymentMethod};
 pub(crate) use saga::MintSaga;
 use tracing::instrument;
 
 use crate::amount::SplitTarget;
-use crate::nuts::{BatchCheckMintQuoteRequest, Proofs, SecretKey, SpendingConditions};
+use crate::nuts::{BatchCheckMintQuoteRequest, Proofs, PublicKey, SecretKey, SpendingConditions};
 use crate::util::unix_time;
 use crate::wallet::recovery::RecoveryAction;
 use crate::wallet::{MintQuote, MintQuoteState};
-use crate::{Amount, Error, Wallet};
+use crate::{ensure_cdk, Amount, Error, Wallet};
 
 pub(crate) fn apply_mint_quote_response(
     quote: &mut MintQuote,
@@ -146,6 +149,39 @@ fn mint_quote_response_amount(response: &MintQuoteResponse<String>) -> Option<Am
         MintQuoteResponse::Custom { response: r, .. } => r.amount,
         MintQuoteResponse::Onchain(_) => None,
     }
+}
+
+/// Build the signed [NUT-XX] request that proves control of `secret_keys` to `mint_pubkey`.
+///
+/// One signature is produced per key, over `mint_quote_lookup_msg_to_sign(mint_pubkey, pubkey)`.
+fn build_mint_quote_by_pubkey_request(
+    mint_pubkey: &PublicKey,
+    secret_keys: &[SecretKey],
+) -> Result<MintQuoteByPubkeyRequest, Error> {
+    ensure_cdk!(
+        secret_keys.len() <= MAX_LOOKUP_PUBKEYS,
+        Error::BatchSizeExceeded {
+            actual: secret_keys.len(),
+            max: MAX_LOOKUP_PUBKEYS,
+        }
+    );
+
+    let mut pubkeys = Vec::with_capacity(secret_keys.len());
+    let mut pubkey_signatures = Vec::with_capacity(secret_keys.len());
+
+    for secret_key in secret_keys {
+        let pubkey = secret_key.public_key();
+        let msg = mint_quote_lookup_msg_to_sign(mint_pubkey, &pubkey);
+        let signature = secret_key.sign(&msg)?;
+
+        pubkeys.push(pubkey);
+        pubkey_signatures.push(signature);
+    }
+
+    Ok(MintQuoteByPubkeyRequest {
+        pubkeys,
+        pubkey_signatures,
+    })
 }
 
 impl Wallet {
@@ -650,6 +686,40 @@ impl Wallet {
         }
 
         Ok(quotes)
+    }
+
+    /// Look up this wallet's mint quotes locked to the given NUT-20 keys (NUT-XX).
+    ///
+    /// Fetches the mint's NUT-06 pubkey, signs the per-key lookup challenge for each of
+    /// `secret_keys`, queries the mint, and returns the quotes. The mint answers with every
+    /// quote it holds for any of `secret_keys` regardless of payment method, so the result may
+    /// mix Bolt11/Bolt12/Onchain/Custom responses.
+    ///
+    /// This is a pure query: results are not written to the local store, so the caller decides
+    /// how to reconcile them. Persisting a returned quote is as simple as re-fetching it the
+    /// normal way once its ID is known, e.g.
+    /// `wallet.fetch_mint_quote(quote.quote(), Some(quote.method())).await?`, which upserts it
+    /// through the same accounting `mint_quote`/`fetch_mint_quote` already use.
+    ///
+    /// # Errors
+    /// Returns `Error::BatchSizeExceeded` if `secret_keys` is longer than `MAX_LOOKUP_PUBKEYS`;
+    /// splitting a larger recovery set into chunks of at most `MAX_LOOKUP_PUBKEYS` and issuing
+    /// one call per chunk is the caller's responsibility. Returns `Error::MissingPubkey` if the
+    /// mint does not advertise a NUT-06 pubkey.
+    #[instrument(skip(self, secret_keys))]
+    pub async fn mint_quotes_by_pubkey(
+        &self,
+        secret_keys: &[SecretKey],
+    ) -> Result<Vec<MintQuoteResponse<String>>, Error> {
+        let mint_pubkey = self
+            .load_mint_info()
+            .await?
+            .pubkey
+            .ok_or(Error::MissingPubkey)?;
+
+        let request = build_mint_quote_by_pubkey_request(&mint_pubkey, secret_keys)?;
+
+        self.client.post_mint_quote_by_pubkey(request).await
     }
 
     /// Mint tokens for multiple quotes in a single batch operation.
