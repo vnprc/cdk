@@ -763,11 +763,114 @@ impl Wallet {
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
+    use std::sync::Arc;
 
     use cdk_common::mint_url::MintUrl;
     use cdk_common::nuts::CurrencyUnit;
 
     use super::*;
+    use crate::wallet::test_utils::{
+        create_test_db, create_test_wallet_with_mock, MockMintConnector,
+    };
+
+    #[test]
+    fn mint_quote_by_pubkey_request_signs_and_verifies() {
+        let mint_pubkey = SecretKey::generate().public_key();
+        let secret_keys = vec![SecretKey::generate(), SecretKey::generate()];
+
+        let request = build_mint_quote_by_pubkey_request(&mint_pubkey, &secret_keys)
+            .expect("request should build for a small key set");
+
+        assert_eq!(request.pubkeys.len(), secret_keys.len());
+        assert_eq!(request.pubkey_signatures.len(), secret_keys.len());
+
+        for ((secret_key, pubkey), signature) in secret_keys
+            .iter()
+            .zip(request.pubkeys.iter())
+            .zip(request.pubkey_signatures.iter())
+        {
+            assert_eq!(*pubkey, secret_key.public_key());
+
+            // Round-trip: the signature must verify against the same preimage the mint checks.
+            let msg = mint_quote_lookup_msg_to_sign(&mint_pubkey, pubkey);
+            assert!(pubkey.verify(&msg, signature).is_ok());
+
+            // And it must not verify against a different mint's preimage (mint-bound).
+            let other_mint_pubkey = SecretKey::generate().public_key();
+            let other_msg = mint_quote_lookup_msg_to_sign(&other_mint_pubkey, pubkey);
+            assert!(pubkey.verify(&other_msg, signature).is_err());
+        }
+    }
+
+    #[test]
+    fn mint_quote_by_pubkey_request_rejects_oversized_batch() {
+        let mint_pubkey = SecretKey::generate().public_key();
+        let secret_keys: Vec<SecretKey> = (0..=MAX_LOOKUP_PUBKEYS)
+            .map(|_| SecretKey::generate())
+            .collect();
+
+        let result = build_mint_quote_by_pubkey_request(&mint_pubkey, &secret_keys);
+        assert!(matches!(
+            result,
+            Err(Error::BatchSizeExceeded { actual, max })
+                if actual == secret_keys.len() && max == MAX_LOOKUP_PUBKEYS
+        ));
+    }
+
+    /// `Wallet::mint_quotes_by_pubkey` against a mock connector: the mint pubkey comes from
+    /// mint info, the request the connector receives carries a valid mint-bound signature over
+    /// the wallet's own pubkey, and the mocked response is returned to the caller unchanged.
+    #[tokio::test]
+    async fn mint_quotes_by_pubkey_signs_and_returns_mock_response() {
+        let db = create_test_db().await;
+        let mock = Arc::new(MockMintConnector::new());
+        let wallet = create_test_wallet_with_mock(db, mock.clone()).await;
+
+        let mint_pubkey = wallet
+            .load_mint_info()
+            .await
+            .expect("mock mint info")
+            .pubkey
+            .expect("mock mint info has a pubkey");
+
+        let secret_key = SecretKey::generate();
+        let canned_response = vec![MintQuoteResponse::Bolt11(
+            cdk_common::nut23::MintQuoteBolt11Response {
+                quote: "quote-id".to_string(),
+                request: "lnbc1...".to_string(),
+                amount: Some(Amount::from(100)),
+                unit: Some(CurrencyUnit::Sat),
+                method: PaymentMethod::Known(KnownMethod::Bolt11),
+                amount_paid: Amount::ZERO,
+                amount_issued: Amount::ZERO,
+                updated_at: 0,
+                state: MintQuoteState::Unpaid,
+                expiry: None,
+                pubkey: None,
+            },
+        )];
+        mock.set_mint_quote_by_pubkey_response(Ok(canned_response));
+
+        let quotes = wallet
+            .mint_quotes_by_pubkey(std::slice::from_ref(&secret_key))
+            .await
+            .expect("lookup should succeed");
+
+        assert_eq!(quotes.len(), 1);
+        assert_eq!(quotes[0].quote(), &"quote-id".to_string());
+
+        let captured = mock.captured_mint_quote_by_pubkey_requests.lock().unwrap();
+        assert_eq!(captured.len(), 1);
+        let sent = &captured[0];
+        assert_eq!(sent.pubkeys, vec![secret_key.public_key()]);
+        assert_eq!(sent.pubkey_signatures.len(), 1);
+
+        let msg = mint_quote_lookup_msg_to_sign(&mint_pubkey, &secret_key.public_key());
+        assert!(secret_key
+            .public_key()
+            .verify(&msg, &sent.pubkey_signatures[0])
+            .is_ok());
+    }
 
     #[test]
     fn local_onchain_mint_quote_amount_is_not_stored() {
