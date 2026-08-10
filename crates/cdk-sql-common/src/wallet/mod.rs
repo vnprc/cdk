@@ -1184,12 +1184,15 @@ where
         let expected_version = quote.version;
         let new_version = expected_version.wrapping_add(1);
 
+        // `created_time` is bound on insert only and deliberately absent from the conflict
+        // clause: the row keeps the time it was first stored, while every other field tracks
+        // the latest state.
         let rows_affected = query(
                 r#"
     INSERT INTO mint_quote
-    (id, mint_url, amount, unit, request, state, expiry, secret_key, payment_method, amount_issued, amount_paid, updated_at, estimated_blocks, version, used_by_operation)
+    (id, mint_url, amount, unit, request, state, expiry, secret_key, payment_method, amount_issued, amount_paid, updated_at, estimated_blocks, version, used_by_operation, created_time)
     VALUES
-    (:id, :mint_url, :amount, :unit, :request, :state, :expiry, :secret_key, :payment_method, :amount_issued, :amount_paid, :updated_at, :estimated_blocks, :version, :used_by_operation)
+    (:id, :mint_url, :amount, :unit, :request, :state, :expiry, :secret_key, :payment_method, :amount_issued, :amount_paid, :updated_at, :estimated_blocks, :version, :used_by_operation, :created_time)
     ON CONFLICT(id) DO UPDATE SET
         mint_url = excluded.mint_url,
         amount = excluded.amount,
@@ -1226,6 +1229,7 @@ where
             .bind("new_version", new_version as i64)
             .bind("expected_version", expected_version as i64)
             .bind("used_by_operation", quote.used_by_operation)
+            .bind("created_time", unix_time() as i64)
             .execute(&*conn).await?;
 
         if rows_affected == 0 {

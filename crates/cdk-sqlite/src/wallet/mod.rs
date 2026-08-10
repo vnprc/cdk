@@ -194,6 +194,82 @@ mod tests {
         }
     }
 
+    /// `created_time` is stamped with the current time when a mint quote row is first stored,
+    /// and later stores of the same quote preserve it. The column is not part of the public
+    /// `MintQuote` struct, so it is read back with a raw connection (which is also why this
+    /// test is skipped under sqlcipher).
+    #[cfg(not(feature = "sqlcipher"))]
+    #[tokio::test]
+    async fn test_mint_quote_created_time_stamped_on_first_store() {
+        use cdk_common::mint_url::MintUrl;
+        use cdk_common::nuts::{CurrencyUnit, PaymentMethod};
+        use cdk_common::util::unix_time;
+        use cdk_common::wallet::MintQuote;
+        use cdk_common::Amount;
+
+        let path = std::env::temp_dir().to_path_buf().join(format!(
+            "cdk-test-created-time-{}.sqlite",
+            uuid::Uuid::new_v4()
+        ));
+
+        let db = WalletSqliteDatabase::new(path.clone()).await.unwrap();
+
+        let quote = MintQuote::new(
+            "created-time-quote".to_string(),
+            MintUrl::from_str("https://example.com").unwrap(),
+            PaymentMethod::Known(KnownMethod::Bolt11),
+            Some(Amount::from(100)),
+            CurrencyUnit::Sat,
+            "test_request".to_string(),
+            1000000000,
+            None,
+        );
+
+        let before = unix_time();
+        db.add_mint_quote(quote).await.unwrap();
+
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        let read_created_time = |conn: &rusqlite::Connection| -> u64 {
+            conn.query_row(
+                "SELECT created_time FROM mint_quote WHERE id = ?1",
+                ["created-time-quote"],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+
+        let created_time = read_created_time(&conn);
+        assert!(
+            created_time >= before,
+            "first store must stamp created_time with the current time, got {created_time}"
+        );
+
+        // Plant a sentinel before re-storing, so an (incorrect) restamp with the current time
+        // cannot be mistaken for preservation.
+        conn.execute(
+            "UPDATE mint_quote SET created_time = 1 WHERE id = ?1",
+            ["created-time-quote"],
+        )
+        .unwrap();
+
+        let mut updated = db
+            .get_mint_quote("created-time-quote")
+            .await
+            .unwrap()
+            .unwrap();
+        updated.amount_paid = Amount::from(100);
+        db.add_mint_quote(updated).await.unwrap();
+
+        assert_eq!(
+            read_created_time(&conn),
+            1,
+            "storing an existing quote must not restamp created_time"
+        );
+
+        drop(conn);
+        let _ = std::fs::remove_file(&path);
+    }
+
     #[tokio::test]
     async fn test_get_proofs_by_ys_empty_errors() {
         use cdk_common::database::Error;
